@@ -253,35 +253,11 @@ def init_state():
             "3rd": {},
         }
 
+    if "hero_invested" not in st.session_state:
+        st.session_state.hero_invested = 0.0
+
     if "blinds_posted" not in st.session_state:
         st.session_state.blinds_posted = False
-
-
-def reset_hand_all():
-    st.session_state.hero_cards = {field: [] for field in HERO_CARD_FIELDS}
-
-    st.session_state.logs = {
-        "pre": [],
-        "1st": [],
-        "2nd": [],
-        "3rd": [],
-    }
-
-    st.session_state.changes = {
-        "1st": {},
-        "2nd": {},
-        "3rd": {},
-    }
-
-    st.session_state.action_state = fresh_action_state()
-    st.session_state.current_change_index = fresh_change_index()
-    st.session_state.current_step = "pre_betting"
-    st.session_state.folded_player_ids = set()
-
-    reset_pot_state()
-
-    for p in st.session_state.players:
-        p["active"] = True
 
 
 init_state()
@@ -808,6 +784,54 @@ def players_position_signature():
     return "|".join([f'{p["id"]}:{p["position"]}' for p in st.session_state.players])
 
 
+def reset_pot_state():
+    st.session_state.pot_size = 0.0
+
+    st.session_state.pot_history = {
+        "pre": 0.0,
+        "1st": 0.0,
+        "2nd": 0.0,
+        "3rd": 0.0,
+    }
+
+    st.session_state.street_contrib = {
+        "pre": {},
+        "1st": {},
+        "2nd": {},
+        "3rd": {},
+    }
+
+    st.session_state.hero_invested = 0.0
+    st.session_state.blinds_posted = False
+
+
+def reset_hand_all():
+    st.session_state.hero_cards = {field: [] for field in HERO_CARD_FIELDS}
+
+    st.session_state.logs = {
+        "pre": [],
+        "1st": [],
+        "2nd": [],
+        "3rd": [],
+    }
+
+    st.session_state.changes = {
+        "1st": {},
+        "2nd": {},
+        "3rd": {},
+    }
+
+    st.session_state.action_state = fresh_action_state()
+    st.session_state.current_change_index = fresh_change_index()
+    st.session_state.current_step = "pre_betting"
+    st.session_state.folded_player_ids = set()
+
+    reset_pot_state()
+
+    for p in st.session_state.players:
+        p["active"] = True
+
+
 def reset_order_state_only():
     st.session_state.action_state = fresh_action_state()
     st.session_state.current_change_index = fresh_change_index()
@@ -965,26 +989,6 @@ def get_bet_unit(street):
     return bb * 2
 
 
-def reset_pot_state():
-    st.session_state.pot_size = 0.0
-
-    st.session_state.pot_history = {
-        "pre": 0.0,
-        "1st": 0.0,
-        "2nd": 0.0,
-        "3rd": 0.0,
-    }
-
-    st.session_state.street_contrib = {
-        "pre": {},
-        "1st": {},
-        "2nd": {},
-        "3rd": {},
-    }
-
-    st.session_state.blinds_posted = False
-
-
 def setup_preflop_pending_after_blinds():
     state = st.session_state.action_state["pre"]
 
@@ -1004,33 +1008,6 @@ def setup_preflop_pending_after_blinds():
         state["current_actor_id"] = first_active_id("pre")
 
 
-def post_blinds():
-    reset_pot_state()
-
-    sb_player = get_player_by_position("SB")
-    bb_player = get_player_by_position("BB")
-
-    sb = float(st.session_state.small_blind)
-    bb = float(st.session_state.big_blind)
-
-    if sb_player:
-        st.session_state.street_contrib["pre"][sb_player["id"]] = sb
-        st.session_state.pot_size += sb
-
-    if bb_player:
-        st.session_state.street_contrib["pre"][bb_player["id"]] = bb
-        st.session_state.pot_size += bb
-
-        st.session_state.action_state["pre"]["has_bet"] = True
-        st.session_state.action_state["pre"]["current_bet"] = bb
-
-    st.session_state.pot_history["pre"] = st.session_state.pot_size
-
-    setup_preflop_pending_after_blinds()
-
-    st.session_state.blinds_posted = True
-
-
 def get_player_street_contrib(street, player_id):
     return float(st.session_state.street_contrib.get(street, {}).get(player_id, 0.0))
 
@@ -1045,6 +1022,37 @@ def add_player_street_contrib(street, player_id, amount):
     st.session_state.street_contrib[street][player_id] = current + amount
     st.session_state.pot_size = round(float(st.session_state.pot_size) + amount, 2)
     st.session_state.pot_history[street] = st.session_state.pot_size
+
+    if player_id == "H":
+        st.session_state.hero_invested = round(
+            float(st.session_state.get("hero_invested", 0.0)) + amount,
+            2
+        )
+
+
+def post_blinds():
+    reset_pot_state()
+
+    sb_player = get_player_by_position("SB")
+    bb_player = get_player_by_position("BB")
+
+    sb = float(st.session_state.small_blind)
+    bb = float(st.session_state.big_blind)
+
+    if sb_player:
+        add_player_street_contrib("pre", sb_player["id"], sb)
+
+    if bb_player:
+        add_player_street_contrib("pre", bb_player["id"], bb)
+
+        st.session_state.action_state["pre"]["has_bet"] = True
+        st.session_state.action_state["pre"]["current_bet"] = bb
+
+    st.session_state.pot_history["pre"] = st.session_state.pot_size
+
+    setup_preflop_pending_after_blinds()
+
+    st.session_state.blinds_posted = True
 
 
 def apply_pot_for_action(street, player_id, action):
@@ -1084,9 +1092,9 @@ def save_pot_snapshot(street):
 
 
 def render_pot_panel():
-    st.markdown("### ポット")
+    st.markdown("### ポット・収支")
 
-    pot_cols = st.columns(4, gap="small")
+    pot_cols = st.columns(5, gap="small")
 
     with pot_cols[0]:
         st.number_input(
@@ -1108,6 +1116,9 @@ def render_pot_panel():
         st.metric("現在ポット", st.session_state.pot_size)
 
     with pot_cols[3]:
+        st.metric("Hero投入額", st.session_state.get("hero_invested", 0.0))
+
+    with pot_cols[4]:
         if st.button("ブラインド投入/再計算", key="post_blinds_btn"):
             st.session_state.action_state = fresh_action_state()
             st.session_state.logs = {
@@ -1711,7 +1722,7 @@ with setting_cols[0]:
 with setting_cols[1]:
     st.number_input(
         "相手人数",
-        min_value=1,
+        min_value=0,
         max_value=7,
         step=1,
         key="opponent_count",
@@ -1950,10 +1961,12 @@ elif current_step in STEP_TO_BET_STREET:
                 current_count = len(st.session_state.hero_cards["predraw_hand"])
 
                 if current_count < hand_size:
-                    st.info(f"Heroのプリドローハンドを{hand_size}枚入力すると、アクションを選べます。")
-                    action_disabled = True
-                else:
-                    action_disabled = False
+                    st.info(
+                        f"Heroのプリドローハンドは現在 {current_count}/{hand_size} 枚です。"
+                        " できれば全枚数入力してからアクションを選んでください。"
+                    )
+
+                action_disabled = False
             else:
                 action_disabled = False
 
@@ -2118,7 +2131,7 @@ for idx, s in enumerate(BET_STREETS):
 st.divider()
 st.subheader("基本情報・結果")
 
-b1, b2, b3, b4, b5 = st.columns(5)
+b1, b2, b3, b4, b5, b6 = st.columns(6)
 
 with b1:
     played_date = st.date_input("日付", value=date.today())
@@ -2130,9 +2143,14 @@ with b3:
     result = st.selectbox("結果", RESULT_OPTIONS)
 
 with b4:
-    profit = st.number_input("収支", value=0.0, step=1.0)
+    hero_return = st.number_input("回収額", value=0.0, step=1.0)
 
 with b5:
+    hero_invested_now = float(st.session_state.get("hero_invested", 0.0))
+    auto_profit_preview = hero_return - hero_invested_now
+    st.metric("自動収支", auto_profit_preview)
+
+with b6:
     mistake_level = st.selectbox("ミス度", ["なし", "小", "中", "大", "要検討"])
 
 st.subheader("メモ・タグ")
@@ -2164,6 +2182,9 @@ if st.button("保存", type="primary"):
         hero_player = get_player_by_id("H")
         hero_position = hero_player["position"] if hero_player else "不明"
 
+        hero_invested = float(st.session_state.get("hero_invested", 0.0))
+        hand_profit = float(hero_return) - hero_invested
+
         row = {
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "date": played_date,
@@ -2176,6 +2197,9 @@ if st.button("保存", type="primary"):
             "small_blind": st.session_state.small_blind,
             "big_blind": st.session_state.big_blind,
             "pot_current": st.session_state.pot_size,
+            "hero_invested": hero_invested,
+            "hero_return": hero_return,
+            "profit": hand_profit,
             "pot_pre": st.session_state.pot_history.get("pre", 0.0),
             "pot_1st": st.session_state.pot_history.get("1st", 0.0),
             "pot_2nd": st.session_state.pot_history.get("2nd", 0.0),
@@ -2201,7 +2225,6 @@ if st.button("保存", type="primary"):
             "third_action_line": street_log_text("3rd"),
 
             "result": result,
-            "profit": profit,
             "mistake_level": mistake_level,
             "tags": ",".join(tags),
             "note": note,
