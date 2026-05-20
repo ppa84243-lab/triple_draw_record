@@ -138,17 +138,20 @@ TAG_OPTIONS = [
 # =========================
 
 def build_players(hero_position, opponent_count):
-    players = [{
-        "id": "H",
-        "name": "Hero",
-        "position": hero_position,
-        "active": True,
-    }]
+    players = [
+        {
+            "id": "H",
+            "name": "Hero",
+            "position": hero_position,
+            "active": True,
+        }
+    ]
 
     available_positions = [p for p in POSITIONS if p != hero_position]
 
     for i in range(int(opponent_count)):
         pos = available_positions[i % len(available_positions)] if available_positions else "UTG"
+
         players.append({
             "id": f"V{i + 1}",
             "name": f"V{i + 1}",
@@ -184,17 +187,11 @@ def init_state():
     if "game_type" not in st.session_state:
         st.session_state.game_type = "27TD"
 
-    if "hero_position" not in st.session_state:
-        st.session_state.hero_position = "BB"
-
     if "opponent_count" not in st.session_state:
         st.session_state.opponent_count = 1
 
     if "players" not in st.session_state:
-        st.session_state.players = build_players(
-            st.session_state.hero_position,
-            st.session_state.opponent_count,
-        )
+        st.session_state.players = build_players("BB", st.session_state.opponent_count)
 
     if "hero_cards" not in st.session_state:
         st.session_state.hero_cards = {}
@@ -229,25 +226,26 @@ def init_state():
 
     if "player_signature" not in st.session_state:
         st.session_state.player_signature = (
-            f"{st.session_state.game_type}_"
-            f"{st.session_state.hero_position}_"
-            f"{st.session_state.opponent_count}"
+            f"{st.session_state.game_type}_{st.session_state.opponent_count}"
         )
 
 
 def reset_hand_all():
     st.session_state.hero_cards = {field: [] for field in HERO_CARD_FIELDS}
+
     st.session_state.logs = {
         "pre": [],
         "1st": [],
         "2nd": [],
         "3rd": [],
     }
+
     st.session_state.changes = {
         "1st": {},
         "2nd": {},
         "3rd": {},
     }
+
     st.session_state.action_state = fresh_action_state()
     st.session_state.current_change_index = fresh_change_index()
     st.session_state.current_step = "pre_betting"
@@ -276,15 +274,13 @@ def suit_name_from_symbol(symbol):
     }.get(symbol, "unknown")
 
 
-def suit_class(symbol):
-    return suit_name_from_symbol(symbol)
-
-
 def cards_to_text(cards):
     if not cards:
         return ""
+
     if PAT in cards:
         return "PAT"
+
     return " ".join(cards)
 
 
@@ -297,7 +293,7 @@ def format_card_html(card):
 
     rank = card[:-1]
     suit = card[-1]
-    cls = suit_class(suit)
+    cls = suit_name_from_symbol(suit)
 
     return f'<span class="card-inline {cls}">{rank}{suit}</span>'
 
@@ -331,6 +327,7 @@ def calculate_hero_hand_after(stage):
             for c in st.session_state.hero_cards["d1_discard"]:
                 if c in hand:
                     hand.remove(c)
+
             hand.extend(st.session_state.hero_cards["d1_draw"])
 
     if stage >= 2:
@@ -338,6 +335,7 @@ def calculate_hero_hand_after(stage):
             for c in st.session_state.hero_cards["d2_discard"]:
                 if c in hand:
                     hand.remove(c)
+
             hand.extend(st.session_state.hero_cards["d2_draw"])
 
     if stage >= 3:
@@ -345,6 +343,7 @@ def calculate_hero_hand_after(stage):
             for c in st.session_state.hero_cards["d3_discard"]:
                 if c in hand:
                     hand.remove(c)
+
             hand.extend(st.session_state.hero_cards["d3_draw"])
 
     return hand
@@ -369,30 +368,39 @@ def current_hero_hand_before_field(field):
 def get_discard_field_from_draw_field(field):
     if field == "d1_draw":
         return "d1_discard"
+
     if field == "d2_draw":
         return "d2_discard"
+
     if field == "d3_draw":
         return "d3_discard"
+
     return None
 
 
 def get_draw_field_from_discard_field(field):
     if field == "d1_discard":
         return "d1_draw"
+
     if field == "d2_discard":
         return "d2_draw"
+
     if field == "d3_discard":
         return "d3_draw"
+
     return None
 
 
 def get_hero_fields_for_change(street):
     if street == "1st":
         return "d1_discard", "d1_draw"
+
     if street == "2nd":
         return "d2_discard", "d2_draw"
+
     if street == "3rd":
         return "d3_discard", "d3_draw"
+
     return None, None
 
 
@@ -431,6 +439,7 @@ def can_add_hero_card(card, field, max_cards):
     if field == "predraw_hand" or field.endswith("_draw"):
         if card in flatten_used_hero_cards():
             return False, "すでに使われています"
+
         return True, ""
 
     if field.endswith("_discard"):
@@ -573,11 +582,11 @@ def render_card_grid_for_field(field, key_prefix):
         suit_symbol = suit["symbol"]
         suit_name = suit_name_from_symbol(suit_symbol)
 
-        row_cols = st.columns([0.25] + [1] * len(RANKS), gap="small")
+        row_cols = st.columns([0.18] + [1] * len(RANKS), gap=None)
 
         with row_cols[0]:
             st.markdown(
-                f'<div class="suit-label {suit_name}">{suit_symbol}</div>',
+                f'<div class="suit-symbol suit-symbol-{suit_name}">{suit_symbol}</div>',
                 unsafe_allow_html=True,
             )
 
@@ -651,10 +660,12 @@ def render_hero_change_input(street):
         f'捨て：{format_cards_html(st.session_state.hero_cards[discard_field])}',
         unsafe_allow_html=True,
     )
+
     st.markdown(
         f'引き：{format_cards_html(st.session_state.hero_cards[draw_field])}',
         unsafe_allow_html=True,
     )
+
     st.write(f"Hero change：**{hero_change_from_cards(street)}**")
 
     tab_discard, tab_draw = st.tabs(["捨てを入力", "引きを入力"])
@@ -702,6 +713,7 @@ def get_player_by_id(pid):
     for p in st.session_state.players:
         if p["id"] == pid:
             return p
+
     return None
 
 
@@ -742,8 +754,10 @@ def get_next_id_after(street, current_id, candidate_ids):
 
 def first_active_id(street):
     players = get_active_players_for_street(street)
+
     if not players:
         return None
+
     return players[0]["id"]
 
 
@@ -799,6 +813,7 @@ def advance_changer(street):
 
 def mark_player_folded(player_id):
     player = get_player_by_id(player_id)
+
     if player:
         player["active"] = False
 
@@ -813,8 +828,10 @@ def active_count():
 
 def street_log_text(street):
     logs = st.session_state.logs[street]
+
     if not logs:
         return "—"
+
     return " / ".join([e["text"] for e in logs])
 
 
@@ -863,6 +880,7 @@ def apply_action(street, action, record=True, auto_move=True):
 
     if action in ["bet", "raise"]:
         state["has_bet"] = True
+
         active_ids = get_ordered_ids(street)
         state["pending"] = [pid for pid in active_ids if pid != actor_id]
         state["acted"] = [actor_id]
@@ -904,13 +922,13 @@ def get_available_actions(street):
     if street == "pre":
         if state["has_bet"]:
             return PREDRAW_ACTIONS_FACING_RAISE
+
         return PREDRAW_ACTIONS_NO_RAISE
 
     if state["has_bet"]:
         return POSTDRAW_ACTIONS_FACING_BET
 
     return POSTDRAW_ACTIONS_NO_BET
-
 
 def recompute_all_from_logs():
     for p in st.session_state.players:
@@ -982,6 +1000,7 @@ def force_prev_step():
 def get_change_options():
     if st.session_state.game_type == "Badugi":
         return CHANGE_OPTIONS_BADUGI
+
     return CHANGE_OPTIONS_27TD
 
 
@@ -997,6 +1016,7 @@ def build_player_summary_df():
 
     for p in sort_players_by_order(st.session_state.players, "pre"):
         pid = p["id"]
+
         rows.append({
             "対象": "Hero" if pid == "H" else pid,
             "位置": p["position"],
@@ -1043,6 +1063,7 @@ def build_street_summary_df():
 def load_data():
     if os.path.exists(CSV_FILE):
         return pd.read_csv(CSV_FILE)
+
     return pd.DataFrame()
 
 
@@ -1081,9 +1102,24 @@ st.markdown(
         padding-left: 0rem !important;
         padding-right: 0rem !important;
     }
-    
+
     div[data-testid="stHorizontalBlock"] {
-    gap: 0.03rem !important;
+        gap: 0.03rem !important;
+    }
+
+    /* カード表の行だけスマホでも横並びを維持 */
+    div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-cardbtn_"]) {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 0.02rem !important;
+        align-items: stretch !important;
+    }
+
+    div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-cardbtn_"]) > div {
+        min-width: 0 !important;
+        padding-left: 0rem !important;
+        padding-right: 0rem !important;
     }
 
     .top-summary-box {
@@ -1184,15 +1220,33 @@ st.markdown(
         color: white;
     }
 
-    .suit-label {
-        font-size: 18px;
+    .suit-symbol {
+        font-size: 16px;
         font-weight: 900;
         text-align: center;
         line-height: 28px;
-        margin-top: 0px;
+        width: 14px;
+        min-width: 14px;
+        max-width: 14px;
+        background: transparent !important;
     }
 
-    /* カードボタン：数字は白、背景はスート色 */
+    .suit-symbol-spade {
+        color: #111111 !important;
+    }
+
+    .suit-symbol-heart {
+        color: #d62828 !important;
+    }
+
+    .suit-symbol-club {
+        color: #2a9d2f !important;
+    }
+
+    .suit-symbol-diamond {
+        color: #1d4ed8 !important;
+    }
+
     div[class*="st-key-cardbtn_"][class*="_spade_"] button {
         background: #111111 !important;
         color: white !important;
@@ -1241,14 +1295,16 @@ st.title("27TD & Badugi Hand History Tracker")
 
 new_signature = (
     f"{st.session_state.game_type}_"
-    f"{st.session_state.hero_position}_"
     f"{st.session_state.opponent_count}"
 )
 
 if new_signature != st.session_state.player_signature:
+    current_hero = get_player_by_id("H")
+    current_hero_pos = current_hero["position"] if current_hero else "BB"
+
     st.session_state.player_signature = new_signature
     st.session_state.players = build_players(
-        st.session_state.hero_position,
+        current_hero_pos,
         st.session_state.opponent_count,
     )
     reset_hand_all()
@@ -1261,7 +1317,7 @@ if new_signature != st.session_state.player_signature:
 
 st.subheader("基本設定")
 
-setting_cols = st.columns(4)
+setting_cols = st.columns(3)
 
 with setting_cols[0]:
     st.radio(
@@ -1272,13 +1328,6 @@ with setting_cols[0]:
     )
 
 with setting_cols[1]:
-    st.selectbox(
-        "Heroポジション",
-        POSITIONS,
-        key="hero_position",
-    )
-
-with setting_cols[2]:
     st.number_input(
         "相手人数",
         min_value=1,
@@ -1287,10 +1336,13 @@ with setting_cols[2]:
         key="opponent_count",
     )
 
-with setting_cols[3]:
+with setting_cols[2]:
     if st.button("プレイヤー再作成"):
+        current_hero = get_player_by_id("H")
+        current_hero_pos = current_hero["position"] if current_hero else "BB"
+
         st.session_state.players = build_players(
-            st.session_state.hero_position,
+            current_hero_pos,
             st.session_state.opponent_count,
         )
         reset_hand_all()
@@ -1331,7 +1383,7 @@ st.markdown(
         <div class="top-summary-title">このハンドの早見表</div>
         <div class="top-summary-sub">
             現在の段階：{FLOW_LABELS[st.session_state.current_step]}。
-            Heroのハンド入力は、Heroの番が来たときだけ表示されます。
+            Heroのポジションは「プレイヤー設定」のH positionで管理します。
         </div>
     </div>
     """,
@@ -1659,6 +1711,7 @@ for idx, s in enumerate(BET_STREETS):
 
         if s != "pre":
             st.markdown("**Change**")
+
             for p in sort_players_by_order(st.session_state.players, s):
                 st.write(f'{p["id"]} {p["position"]}: {player_change_for_street(p["id"], s)}')
 
@@ -1713,13 +1766,16 @@ if st.button("保存", type="primary"):
         hand_after_2 = calculate_hero_hand_after(2)
         hand_final = calculate_hero_hand_after(3)
 
+        hero_player = get_player_by_id("H")
+        hero_position = hero_player["position"] if hero_player else "不明"
+
         row = {
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "date": played_date,
             "tournament": tournament_name,
             "game_type": st.session_state.game_type,
 
-            "hero_position": st.session_state.hero_position,
+            "hero_position": hero_position,
             "opponent_count": st.session_state.opponent_count,
 
             "hero_predraw_hand": cards_to_text(st.session_state.hero_cards["predraw_hand"]),
