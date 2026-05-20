@@ -17,14 +17,14 @@ CSV_FILE = "hand_history.csv"
 RANKS = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]
 
 SUITS = [
-    {"symbol": "♠", "name": "spade", "color": "#3f3f3f"},
-    {"symbol": "♥", "name": "heart", "color": "#b00000"},
-    {"symbol": "♦", "name": "diamond", "color": "#1230b8"},
-    {"symbol": "♣", "name": "club", "color": "#009b2e"},
+    {"symbol": "♠", "name": "spade"},
+    {"symbol": "♥", "name": "heart"},
+    {"symbol": "♦", "name": "diamond"},
+    {"symbol": "♣", "name": "club"},
 ]
 
 FIELDS = [
-    "initial",
+    "predraw_hand",
     "d1_discard",
     "d1_draw",
     "d2_discard",
@@ -34,19 +34,48 @@ FIELDS = [
 ]
 
 FIELD_LABELS = {
-    "initial": "初手",
-    "d1_discard": "1st 捨て",
-    "d1_draw": "1st 引き",
-    "d2_discard": "2nd 捨て",
-    "d2_draw": "2nd 引き",
-    "d3_discard": "3rd 捨て",
-    "d3_draw": "3rd 引き",
+    "predraw_hand": "プリドローハンド",
+    "d1_discard": "1st change 捨て",
+    "d1_draw": "1st change 引き",
+    "d2_discard": "2nd change 捨て",
+    "d2_draw": "2nd change 引き",
+    "d3_discard": "3rd change 捨て",
+    "d3_draw": "3rd change 引き",
 }
 
 MAX_HAND_SIZE = {
     "27TD": 5,
     "Badugi": 4,
 }
+
+PREDRAW_ACTION_OPTIONS = [
+    "なし",
+    "open",
+    "call",
+    "3bet",
+    "4bet/cap",
+    "BB defend",
+    "SB complete",
+    "check",
+    "fold",
+    "その他",
+]
+
+POSTDRAW_ACTION_OPTIONS = [
+    "なし",
+    "check",
+    "bet",
+    "call",
+    "raise",
+    "3bet",
+    "cap",
+    "fold",
+    "bet/call",
+    "bet/fold",
+    "check/call",
+    "check/raise",
+    "その他",
+]
 
 # =========================
 # セッション初期化
@@ -61,7 +90,7 @@ def init_state():
             st.session_state.hands[field] = []
 
     if "selected_field" not in st.session_state:
-        st.session_state.selected_field = "initial"
+        st.session_state.selected_field = "predraw_hand"
 
     if "game_type" not in st.session_state:
         st.session_state.game_type = "27TD"
@@ -92,12 +121,12 @@ def flatten_used_cards():
 def calculate_hand_after(stage):
     """
     stage:
-    0 = 初手
+    0 = プリドロー
     1 = 1st後
     2 = 2nd後
     3 = 3rd後 / 最終
     """
-    hand = list(st.session_state.hands["initial"])
+    hand = list(st.session_state.hands["predraw_hand"])
 
     if stage >= 1:
         for c in st.session_state.hands["d1_discard"]:
@@ -121,7 +150,7 @@ def calculate_hand_after(stage):
 
 
 def current_hand_before_field(field):
-    if field == "initial":
+    if field == "predraw_hand":
         return []
 
     if field in ["d1_discard", "d1_draw"]:
@@ -139,23 +168,25 @@ def current_hand_before_field(field):
 def can_add_card(card, field, max_cards):
     cards_in_field = st.session_state.hands[field]
 
-    # 枚数上限
     if len(cards_in_field) >= max_cards:
         return False, "枚数上限です"
 
-    # 初手・引きカードは山から来るので、既に使ったカードは不可
-    if field == "initial" or field.endswith("_draw"):
+    # プリドローハンド・引きカードは、まだ使っていないカードだけ選択可能
+    if field == "predraw_hand" or field.endswith("_draw"):
         if card in flatten_used_cards():
             return False, "すでに使われています"
         return True, ""
 
-    # 捨てカードは、その時点の手札にあるカードだけ選べる
+    # 捨てカードは、その時点の手札にあるカードだけ選択可能
     if field.endswith("_discard"):
         hand_before = current_hand_before_field(field)
+
         if card not in hand_before:
             return False, "現在手札にないカードです"
+
         if card in cards_in_field:
-            return False, "すでに捨てに選択済みです"
+            return False, "すでに選択済みです"
+
         return True, ""
 
     return True, ""
@@ -219,19 +250,12 @@ st.markdown(
     <style>
     div.stButton > button {
         width: 100%;
-        height: 54px;
-        font-size: 24px;
+        height: 48px;
+        font-size: 22px;
         font-weight: 800;
         border-radius: 8px;
         border: 1px solid #222;
-        color: white;
         padding: 0;
-    }
-
-    .card-row-label {
-        font-size: 22px;
-        font-weight: bold;
-        padding-top: 12px;
     }
 
     .hand-box {
@@ -246,6 +270,14 @@ st.markdown(
     .hand-title {
         font-weight: 700;
         margin-right: 8px;
+    }
+
+    .section-box {
+        padding: 14px;
+        border-radius: 12px;
+        border: 1px solid #dddddd;
+        background: #ffffff;
+        margin-bottom: 12px;
     }
     </style>
     """,
@@ -279,7 +311,7 @@ with left:
 
     st.write(f"現在の入力先：**{FIELD_LABELS[selected_field]}**")
 
-    # カードグリッド
+    # 52枚カードグリッド
     for suit in SUITS:
         cols = st.columns(len(RANKS))
 
@@ -291,34 +323,40 @@ with left:
             ok, _ = can_add_card(card, field, max_cards)
 
             with cols[i]:
-                button_label = card
-                if not ok:
-                    button_label = "🔒"
+                label = card if ok else "🔒"
 
                 clicked = st.button(
-                    button_label,
+                    label,
                     key=f"card_{card}_{field}",
                     disabled=not ok,
                 )
 
-                # 背景色はStreamlit標準ボタンでは個別指定しにくいので、
-                # まずは機能優先。見た目の完全再現は次段階でHTML化する。
                 if clicked:
                     add_card(card)
                     st.rerun()
 
 with right:
+    st.subheader("基本情報")
+
+    played_date = st.date_input("日付", value=date.today())
+    tournament_name = st.text_input("大会名", placeholder="例：27TD & Badugi Mix")
+    position = st.selectbox("ポジション", ["UTG", "HJ", "CO", "BTN", "SB", "BB"])
+    result = st.selectbox("結果", ["win", "lose", "split", "fold", "unknown"])
+    profit = st.number_input("収支", value=0.0, step=1.0)
+    mistake_level = st.selectbox("ミス度", ["なし", "小", "中", "大", "要検討"])
+
+    st.divider()
     st.subheader("操作")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("入力先を1枚戻す"):
+        if st.button("1枚戻す"):
             undo_field(st.session_state.selected_field)
             st.rerun()
 
     with col2:
-        if st.button("入力先をクリア"):
+        if st.button("入力先クリア"):
             clear_field(st.session_state.selected_field)
             st.rerun()
 
@@ -326,20 +364,47 @@ with right:
         reset_current_hand()
         st.rerun()
 
-    st.divider()
+# =========================
+# ハンド計算
+# =========================
 
-    st.subheader("基本情報")
+hand_predraw = calculate_hand_after(0)
+hand_after_1 = calculate_hand_after(1)
+hand_after_2 = calculate_hand_after(2)
+hand_final = calculate_hand_after(3)
 
-    played_date = st.date_input("日付", value=date.today())
-    tournament_name = st.text_input("大会名", placeholder="例：27TD & Badugi Mix")
-    position = st.selectbox("ポジション", ["UTG", "HJ", "CO", "BTN", "SB", "BB"])
-    entry_type = st.selectbox(
-        "参加形態",
-        ["open", "call", "3bet", "BB defend", "SB complete", "limp", "free play", "その他"]
+# =========================
+# アクション入力
+# =========================
+
+st.divider()
+st.subheader("アクション記録")
+
+a1, a2, a3, a4 = st.columns(4)
+
+with a1:
+    predraw_action = st.selectbox(
+        "プリドロー行動",
+        PREDRAW_ACTION_OPTIONS,
     )
-    result = st.selectbox("結果", ["win", "lose", "split", "fold", "unknown"])
-    profit = st.number_input("収支", value=0.0, step=1.0)
-    mistake_level = st.selectbox("ミス度", ["なし", "小", "中", "大", "要検討"])
+
+with a2:
+    action_after_1 = st.selectbox(
+        "1st change後 action",
+        POSTDRAW_ACTION_OPTIONS,
+    )
+
+with a3:
+    action_after_2 = st.selectbox(
+        "2nd change後 action",
+        POSTDRAW_ACTION_OPTIONS,
+    )
+
+with a4:
+    action_after_3 = st.selectbox(
+        "3rd change後 action",
+        POSTDRAW_ACTION_OPTIONS,
+    )
 
 # =========================
 # 現在の記録表示
@@ -348,14 +413,11 @@ with right:
 st.divider()
 st.subheader("現在の記録")
 
-hand_initial = calculate_hand_after(0)
-hand_after_1 = calculate_hand_after(1)
-hand_after_2 = calculate_hand_after(2)
-hand_final = calculate_hand_after(3)
+c1, c2 = st.columns(2)
 
-display_cols = st.columns(2)
+with c1:
+    st.markdown("### 入力したカード")
 
-with display_cols[0]:
     for field in FIELDS:
         st.markdown(
             f"""
@@ -367,21 +429,26 @@ with display_cols[0]:
             unsafe_allow_html=True,
         )
 
-with display_cols[1]:
+with c2:
+    st.markdown("### 自動計算された手札")
+
     st.markdown(
         f"""
         <div class="hand-box">
-            <span class="hand-title">初手：</span>
-            {cards_to_text(hand_initial) or "—"}
+            <span class="hand-title">プリドロー：</span>
+            {cards_to_text(hand_predraw) or "—"}
         </div>
+
         <div class="hand-box">
             <span class="hand-title">1st後：</span>
             {cards_to_text(hand_after_1) or "—"}
         </div>
+
         <div class="hand-box">
             <span class="hand-title">2nd後：</span>
             {cards_to_text(hand_after_2) or "—"}
         </div>
+
         <div class="hand-box">
             <span class="hand-title">最終：</span>
             {cards_to_text(hand_final) or "—"}
@@ -390,17 +457,49 @@ with display_cols[1]:
         unsafe_allow_html=True,
     )
 
+st.markdown("### 流れ")
+
+st.markdown(
+    f"""
+    <div class="section-box">
+        <b>プリドロー</b><br>
+        ハンド：{cards_to_text(hand_predraw) or "—"}<br>
+        行動：{predraw_action}
+    </div>
+
+    <div class="section-box">
+        <b>1st change → bet</b><br>
+        捨て：{cards_to_text(st.session_state.hands["d1_discard"]) or "pat / —"}<br>
+        引き：{cards_to_text(st.session_state.hands["d1_draw"]) or "—"}<br>
+        1st後：{cards_to_text(hand_after_1) or "—"}<br>
+        action：{action_after_1}
+    </div>
+
+    <div class="section-box">
+        <b>2nd change → bet</b><br>
+        捨て：{cards_to_text(st.session_state.hands["d2_discard"]) or "pat / —"}<br>
+        引き：{cards_to_text(st.session_state.hands["d2_draw"]) or "—"}<br>
+        2nd後：{cards_to_text(hand_after_2) or "—"}<br>
+        action：{action_after_2}
+    </div>
+
+    <div class="section-box">
+        <b>3rd change → bet</b><br>
+        捨て：{cards_to_text(st.session_state.hands["d3_discard"]) or "pat / —"}<br>
+        引き：{cards_to_text(st.session_state.hands["d3_draw"]) or "—"}<br>
+        最終：{cards_to_text(hand_final) or "—"}<br>
+        action：{action_after_3}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 # =========================
 # メモ・タグ
 # =========================
 
 st.divider()
-st.subheader("アクション・メモ")
-
-action_log = st.text_area(
-    "アクションメモ",
-    placeholder="例：CO open / BB call / 1st BB 2c Hero 1c / bet call ..."
-)
+st.subheader("メモ・タグ")
 
 tags = st.multiselect(
     "タグ",
@@ -424,7 +523,7 @@ tags = st.multiselect(
 
 note = st.text_area(
     "メモ",
-    placeholder="例：9を切るべきだったか / rough badugiでpatしすぎかも"
+    placeholder="例：2ndで9を壊すべきだったか / rough badugiでpatしすぎかも"
 )
 
 # =========================
@@ -437,8 +536,8 @@ if st.button("保存", type="primary"):
     game_type = st.session_state.game_type
     max_cards = MAX_HAND_SIZE[game_type]
 
-    if len(st.session_state.hands["initial"]) != max_cards:
-        st.error(f"{game_type}の初手は{max_cards}枚選んでください。")
+    if len(st.session_state.hands["predraw_hand"]) != max_cards:
+        st.error(f"{game_type}のプリドローハンドは{max_cards}枚選んでください。")
     else:
         row = {
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -446,26 +545,29 @@ if st.button("保存", type="primary"):
             "tournament": tournament_name,
             "game_type": game_type,
             "position": position,
-            "entry_type": entry_type,
 
-            "initial": cards_to_text(st.session_state.hands["initial"]),
+            "predraw_hand": cards_to_text(st.session_state.hands["predraw_hand"]),
+            "predraw_action": predraw_action,
+
             "d1_discard": cards_to_text(st.session_state.hands["d1_discard"]),
             "d1_draw": cards_to_text(st.session_state.hands["d1_draw"]),
             "hand_after_1": cards_to_text(hand_after_1),
+            "action_after_1": action_after_1,
 
             "d2_discard": cards_to_text(st.session_state.hands["d2_discard"]),
             "d2_draw": cards_to_text(st.session_state.hands["d2_draw"]),
             "hand_after_2": cards_to_text(hand_after_2),
+            "action_after_2": action_after_2,
 
             "d3_discard": cards_to_text(st.session_state.hands["d3_discard"]),
             "d3_draw": cards_to_text(st.session_state.hands["d3_draw"]),
             "final_hand": cards_to_text(hand_final),
+            "action_after_3": action_after_3,
 
-            "action_log": action_log,
-            "tags": ",".join(tags),
             "result": result,
             "profit": profit,
             "mistake_level": mistake_level,
+            "tags": ",".join(tags),
             "note": note,
         }
 
@@ -498,16 +600,16 @@ else:
 
     st.subheader("簡易集計")
 
-    col1, col2, col3 = st.columns(3)
+    m1, m2, m3 = st.columns(3)
 
-    with col1:
+    with m1:
         st.metric("記録ハンド数", len(df))
 
-    with col2:
+    with m2:
         if "profit" in df.columns:
             st.metric("合計収支", df["profit"].sum())
 
-    with col3:
+    with m3:
         if "result" in df.columns:
             st.metric("勝利数", (df["result"] == "win").sum())
 
