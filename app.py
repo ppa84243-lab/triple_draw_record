@@ -224,11 +224,6 @@ def init_state():
     if "current_step" not in st.session_state:
         st.session_state.current_step = "pre_betting"
 
-    if "player_signature" not in st.session_state:
-        st.session_state.player_signature = (
-            f"{st.session_state.game_type}_{st.session_state.opponent_count}"
-        )
-
 
 def reset_hand_all():
     st.session_state.hero_cards = {field: [] for field in HERO_CARD_FIELDS}
@@ -327,7 +322,6 @@ def calculate_hero_hand_after(stage):
             for c in st.session_state.hero_cards["d1_discard"]:
                 if c in hand:
                     hand.remove(c)
-
             hand.extend(st.session_state.hero_cards["d1_draw"])
 
     if stage >= 2:
@@ -335,7 +329,6 @@ def calculate_hero_hand_after(stage):
             for c in st.session_state.hero_cards["d2_discard"]:
                 if c in hand:
                     hand.remove(c)
-
             hand.extend(st.session_state.hero_cards["d2_draw"])
 
     if stage >= 3:
@@ -343,7 +336,6 @@ def calculate_hero_hand_after(stage):
             for c in st.session_state.hero_cards["d3_discard"]:
                 if c in hand:
                     hand.remove(c)
-
             hand.extend(st.session_state.hero_cards["d3_draw"])
 
     return hand
@@ -368,39 +360,30 @@ def current_hero_hand_before_field(field):
 def get_discard_field_from_draw_field(field):
     if field == "d1_draw":
         return "d1_discard"
-
     if field == "d2_draw":
         return "d2_discard"
-
     if field == "d3_draw":
         return "d3_discard"
-
     return None
 
 
 def get_draw_field_from_discard_field(field):
     if field == "d1_discard":
         return "d1_draw"
-
     if field == "d2_discard":
         return "d2_draw"
-
     if field == "d3_discard":
         return "d3_draw"
-
     return None
 
 
 def get_hero_fields_for_change(street):
     if street == "1st":
         return "d1_discard", "d1_draw"
-
     if street == "2nd":
         return "d2_discard", "d2_draw"
-
     if street == "3rd":
         return "d3_discard", "d3_draw"
-
     return None, None
 
 
@@ -439,7 +422,6 @@ def can_add_hero_card(card, field, max_cards):
     if field == "predraw_hand" or field.endswith("_draw"):
         if card in flatten_used_hero_cards():
             return False, "すでに使われています"
-
         return True, ""
 
     if field.endswith("_discard"):
@@ -582,7 +564,7 @@ def render_card_grid_for_field(field, key_prefix):
         suit_symbol = suit["symbol"]
         suit_name = suit_name_from_symbol(suit_symbol)
 
-        row_cols = st.columns([0.22] + [1] * len(RANKS), gap=None)
+        row_cols = st.columns([0.12] + [1] * len(RANKS), gap=None)
 
         with row_cols[0]:
             st.markdown(
@@ -724,12 +706,45 @@ def get_current_hero_position():
     return "BB"
 
 
-def rebuild_players_keep_hero_position():
-    hero_position = get_current_hero_position()
-    st.session_state.players = build_players(
-        hero_position,
-        st.session_state.opponent_count,
-    )
+def sync_players_to_opponent_count():
+    target_villain_count = int(st.session_state.opponent_count)
+
+    old_players = st.session_state.players if "players" in st.session_state else []
+    old_hero = next((p for p in old_players if p["id"] == "H"), None)
+
+    if old_hero is None:
+        old_hero = {
+            "id": "H",
+            "name": "Hero",
+            "position": "BB",
+            "active": True,
+        }
+
+    new_players = [old_hero]
+    old_villains = [p for p in old_players if p["id"] != "H"]
+
+    used_positions = {old_hero["position"]}
+    available_positions = [p for p in POSITIONS if p not in used_positions]
+
+    for i in range(target_villain_count):
+        villain_id = f"V{i + 1}"
+        old_v = next((p for p in old_villains if p["id"] == villain_id), None)
+
+        if old_v:
+            pos = old_v["position"]
+            active = old_v.get("active", True)
+        else:
+            pos = available_positions[i % len(available_positions)] if available_positions else "UTG"
+            active = True
+
+        new_players.append({
+            "id": villain_id,
+            "name": villain_id,
+            "position": pos,
+            "active": active,
+        })
+
+    st.session_state.players = new_players
 
 
 def players_position_signature():
@@ -1136,16 +1151,15 @@ def save_data(row):
 st.markdown(
     """
     <style>
+    /* 通常ボタン */
     div.stButton > button {
         width: 100%;
-        min-height: 58px;
-        font-size: 24px;
-        font-weight: 900;
-        border-radius: 2px;
-        border: none;
+        min-height: 34px;
+        font-size: 16px;
+        font-weight: 800;
+        border-radius: 5px;
         padding: 0;
         margin: 0;
-        box-shadow: none !important;
     }
 
     div[data-testid="column"] {
@@ -1157,19 +1171,43 @@ st.markdown(
         gap: 0rem !important;
     }
 
-    /* カード表の行だけスマホでも横並びを維持 */
+    /* カード表の行はスマホでも横並び固定 */
     div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-cardbtn_"]) {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
         gap: 0rem !important;
         align-items: stretch !important;
+        width: 100% !important;
     }
 
     div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-cardbtn_"]) > div {
+        flex: 1 1 0 !important;
         min-width: 0 !important;
         padding-left: 0rem !important;
         padding-right: 0rem !important;
+    }
+
+    div[class*="st-key-cardbtn_"] {
+        width: 100% !important;
+    }
+
+    div[class*="st-key-cardbtn_"] div.stButton {
+        width: 100% !important;
+    }
+
+    div[class*="st-key-cardbtn_"] div.stButton > button {
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 46px !important;
+        min-height: 46px !important;
+        font-size: 22px !important;
+        font-weight: 900 !important;
+        border-radius: 3px !important;
+        border: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        box-shadow: none !important;
     }
 
     .top-summary-box {
@@ -1270,15 +1308,14 @@ st.markdown(
         color: white;
     }
 
-    /* 左端のスート記号 */
     .suit-symbol {
-        font-size: 22px;
+        font-size: 18px;
         font-weight: 900;
         text-align: center;
-        line-height: 58px;
-        width: 20px;
-        min-width: 20px;
-        max-width: 20px;
+        line-height: 46px;
+        width: 12px;
+        min-width: 12px;
+        max-width: 12px;
         background: transparent !important;
     }
 
@@ -1298,7 +1335,6 @@ st.markdown(
         color: #1d4ed8 !important;
     }
 
-    /* 各スートのカードボタン色 */
     div[class*="st-key-cardbtn_"][class*="_spade_"] button {
         background: #2f2f34 !important;
         color: white !important;
@@ -1340,18 +1376,6 @@ st.markdown(
 
 st.title("27TD & Badugi Hand History Tracker")
 
-new_signature = (
-    f"{st.session_state.game_type}_"
-    f"{st.session_state.opponent_count}"
-)
-
-if new_signature != st.session_state.player_signature:
-    st.session_state.player_signature = new_signature
-    rebuild_players_keep_hero_position()
-    reset_hand_all()
-    st.session_state.players_position_signature = players_position_signature()
-    st.rerun()
-
 
 # =========================
 # 基本設定
@@ -1378,9 +1402,11 @@ with setting_cols[1]:
         key="opponent_count",
     )
 
+sync_players_to_opponent_count()
+
 with setting_cols[2]:
     if st.button("プレイヤー再作成"):
-        rebuild_players_keep_hero_position()
+        sync_players_to_opponent_count()
         reset_hand_all()
         st.session_state.players_position_signature = players_position_signature()
         st.rerun()
