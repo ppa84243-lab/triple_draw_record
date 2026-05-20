@@ -51,50 +51,59 @@ MAX_HAND_SIZE = {
 
 POSITIONS = ["UTG", "HJ", "CO", "BTN", "SB", "BB"]
 
-PREDRAW_ACTION_OPTIONS = [
-    "なし",
-    "open",
-    "call",
-    "3bet",
-    "4bet/cap",
-    "BB defend",
-    "SB complete",
-    "check",
-    "fold",
-    "その他",
+# プリドローは状況ごとに選べるアクションを変える
+PREDRAW_SPOT_OPTIONS = [
+    "未参加ポット",
+    "raiseに直面",
+    "raise上限到達",
+    "BBでチェック可能",
+    "limp/completeに直面",
 ]
 
-POSTDRAW_ACTION_OPTIONS = [
-    "なし",
+def get_hero_predraw_actions(spot):
+    if spot == "未参加ポット":
+        return ["raise", "fold"]
+
+    if spot == "raiseに直面":
+        return ["call", "raise", "fold"]
+
+    if spot == "raise上限到達":
+        return ["call", "fold"]
+
+    if spot == "BBでチェック可能":
+        return ["check", "raise"]
+
+    if spot == "limp/completeに直面":
+        return ["call", "raise", "fold"]
+
+    return ["不明"]
+
+# 相手は「観測された行動」なので少し広め
+VILLAIN_PREDRAW_ACTION_OPTIONS = [
+    "不明",
+    "fold",
     "check",
-    "bet",
     "call",
     "raise",
-    "3bet",
-    "cap",
-    "fold",
-    "bet/call",
-    "bet/fold",
-    "check/call",
-    "check/raise",
     "その他",
 ]
 
-VILLAIN_ACTION_OPTIONS = [
+POSTDRAW_SUMMARY_ACTION_OPTIONS = [
     "不明",
     "なし",
     "check",
     "bet",
     "call",
     "raise",
-    "3bet",
-    "cap",
     "fold",
-    "donk",
     "check/call",
+    "check/fold",
     "check/raise",
     "bet/call",
     "bet/fold",
+    "bet/raise",
+    "raise/call",
+    "raise/fold",
     "その他",
 ]
 
@@ -107,7 +116,6 @@ VILLAIN_DRAW_OPTIONS = [
     "4c",
     "5c",
 ]
-
 
 # =========================
 # セッション初期化
@@ -134,7 +142,6 @@ def reset_current_hand():
 
 
 init_state()
-
 
 # =========================
 # カード処理
@@ -230,9 +237,11 @@ def can_use_pat(field):
 def can_add_card(card, field, max_cards):
     cards_in_field = st.session_state.hands[field]
 
+    # 同じ欄のカードは再クリックで解除できる
     if card in cards_in_field:
         return True, "選択解除できます"
 
+    # PAT済みならdrawには追加不可
     if field == "d1_draw" and PAT in st.session_state.hands["d1_discard"]:
         return False, "1stはPAT済みです"
 
@@ -242,17 +251,21 @@ def can_add_card(card, field, max_cards):
     if field == "d3_draw" and PAT in st.session_state.hands["d3_discard"]:
         return False, "3rdはPAT済みです"
 
+    # discard欄がPAT済みならカード追加不可
     if field.endswith("_discard") and PAT in st.session_state.hands[field]:
         return False, "PAT済みです"
 
+    # 枚数上限
     if len(cards_in_field) >= max_cards:
         return False, "枚数上限です"
 
+    # プリドロー・引きカードは未使用カードのみ
     if field == "predraw_hand" or field.endswith("_draw"):
         if card in flatten_used_cards():
             return False, "すでに使われています"
         return True, ""
 
+    # 捨てカードはその時点の手札からのみ
     if field.endswith("_discard"):
         hand_before = current_hand_before_field(field)
 
@@ -302,12 +315,14 @@ def set_pat(field):
         draw_field = field
         discard_field = get_discard_field_from_draw_field(field)
 
+    # PAT解除
     if PAT in st.session_state.hands[discard_field]:
         st.session_state.hands[discard_field] = []
         if draw_field:
             st.session_state.hands[draw_field] = []
         return
 
+    # PATセット
     st.session_state.hands[discard_field] = [PAT]
 
     if draw_field:
@@ -344,7 +359,6 @@ def change_action_text(change_value, action_value):
 
 def hero_change_text(discard_cards, draw_cards):
     discard_text = cards_to_text(discard_cards)
-    draw_text = cards_to_text(draw_cards)
 
     if discard_text == "PAT":
         return "pat"
@@ -378,7 +392,6 @@ def save_data(row):
 
     df.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
     return df
-
 
 # =========================
 # CSS
@@ -443,7 +456,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 # =========================
 # UI
 # =========================
@@ -477,6 +489,7 @@ with left:
     with st.expander("カードを選択する", expanded=False):
         if can_use_pat(st.session_state.selected_field):
             pat_cols = st.columns([2, 11])
+
             with pat_cols[0]:
                 current_field = st.session_state.selected_field
                 related_discard = (
@@ -532,12 +545,36 @@ with right:
     position = st.selectbox("自分のポジション", POSITIONS)
     opponent_count = st.number_input("相手人数", min_value=1, max_value=7, value=1, step=1)
 
-    st.markdown("### Hero アクション")
+    st.markdown("### Hero プリドロー")
 
-    predraw_action = st.selectbox("Hero プリドロー行動", PREDRAW_ACTION_OPTIONS)
-    action_after_1 = st.selectbox("Hero 1st後 action", POSTDRAW_ACTION_OPTIONS)
-    action_after_2 = st.selectbox("Hero 2nd後 action", POSTDRAW_ACTION_OPTIONS)
-    action_after_3 = st.selectbox("Hero 3rd後 action", POSTDRAW_ACTION_OPTIONS)
+    hero_predraw_spot = st.selectbox(
+        "プリドロー状況",
+        PREDRAW_SPOT_OPTIONS,
+    )
+
+    hero_predraw_action_options = get_hero_predraw_actions(hero_predraw_spot)
+
+    predraw_action = st.selectbox(
+        "Hero プリドロー行動",
+        hero_predraw_action_options,
+    )
+
+    st.markdown("### Hero 1st以降")
+
+    action_after_1 = st.selectbox(
+        "Hero 1st後 summary",
+        POSTDRAW_SUMMARY_ACTION_OPTIONS,
+    )
+
+    action_after_2 = st.selectbox(
+        "Hero 2nd後 summary",
+        POSTDRAW_SUMMARY_ACTION_OPTIONS,
+    )
+
+    action_after_3 = st.selectbox(
+        "Hero 3rd後 summary",
+        POSTDRAW_SUMMARY_ACTION_OPTIONS,
+    )
 
     st.markdown("### Villain 情報")
 
@@ -555,7 +592,7 @@ with right:
 
             v_predraw_action = st.selectbox(
                 f"V{villain_no} プリドロー行動",
-                PREDRAW_ACTION_OPTIONS,
+                VILLAIN_PREDRAW_ACTION_OPTIONS,
                 key=f"v{villain_no}_predraw_action",
             )
 
@@ -582,20 +619,20 @@ with right:
 
             with vc2:
                 v_action_after_1 = st.selectbox(
-                    f"V{villain_no} 1st後 action",
-                    VILLAIN_ACTION_OPTIONS,
+                    f"V{villain_no} 1st後 summary",
+                    POSTDRAW_SUMMARY_ACTION_OPTIONS,
                     key=f"v{villain_no}_action_after_1",
                 )
 
                 v_action_after_2 = st.selectbox(
-                    f"V{villain_no} 2nd後 action",
-                    VILLAIN_ACTION_OPTIONS,
+                    f"V{villain_no} 2nd後 summary",
+                    POSTDRAW_SUMMARY_ACTION_OPTIONS,
                     key=f"v{villain_no}_action_after_2",
                 )
 
                 v_action_after_3 = st.selectbox(
-                    f"V{villain_no} 3rd後 action",
-                    VILLAIN_ACTION_OPTIONS,
+                    f"V{villain_no} 3rd後 summary",
+                    POSTDRAW_SUMMARY_ACTION_OPTIONS,
                     key=f"v{villain_no}_action_after_3",
                 )
 
@@ -611,12 +648,27 @@ with right:
             "action_after_3": v_action_after_3,
         })
 
-    st.markdown("### アクション履歴")
+    st.markdown("### ベッティングライン")
+
+    line_1 = st.text_input(
+        "1st後 betting line",
+        placeholder="例：H check / V1 bet / H call",
+    )
+
+    line_2 = st.text_input(
+        "2nd後 betting line",
+        placeholder="例：H bet / V1 call",
+    )
+
+    line_3 = st.text_input(
+        "3rd後 betting line",
+        placeholder="例：H check / V1 bet / H call",
+    )
 
     action_history = st.text_area(
-        "自由記述",
-        placeholder="例：BTN open / SB call / BB call / 1st SB 2c BB 1c Hero 1c ...",
-        height=140,
+        "全体メモ形式履歴",
+        placeholder="例：BTN raise / BB call / 1st BB 1c BTN 1c / BB x BTN bet BB call ...",
+        height=120,
     )
 
     st.divider()
@@ -638,7 +690,6 @@ with right:
         reset_current_hand()
         st.rerun()
 
-
 # =========================
 # ハンド計算
 # =========================
@@ -647,7 +698,6 @@ hand_predraw = calculate_hand_after(0)
 hand_after_1 = calculate_hand_after(1)
 hand_after_2 = calculate_hand_after(2)
 hand_final = calculate_hand_after(3)
-
 
 # =========================
 # トップのアクション早見表
@@ -658,6 +708,7 @@ summary_rows = []
 summary_rows.append({
     "対象": "Hero",
     "位置": compact_value(position),
+    "Pre状況": hero_predraw_spot,
     "Pre": compact_value(predraw_action),
     "1st": change_action_text(
         hero_change_text(st.session_state.hands["d1_discard"], st.session_state.hands["d1_draw"]),
@@ -677,6 +728,7 @@ for v in villains:
     summary_rows.append({
         "対象": f"V{v['no']}",
         "位置": compact_value(v["position"]),
+        "Pre状況": "—",
         "Pre": compact_value(v["predraw_action"]),
         "1st": change_action_text(v["d1_draw"], v["action_after_1"]),
         "2nd": change_action_text(v["d2_draw"], v["action_after_2"]),
@@ -685,7 +737,15 @@ for v in villains:
 
 action_summary_df = pd.DataFrame(
     summary_rows,
-    columns=["対象", "位置", "Pre", "1st", "2nd", "3rd"]
+    columns=["対象", "位置", "Pre状況", "Pre", "1st", "2nd", "3rd"]
+)
+
+line_summary_df = pd.DataFrame(
+    [
+        {"Street": "1st後", "Betting Line": line_1 or "—"},
+        {"Street": "2nd後", "Betting Line": line_2 or "—"},
+        {"Street": "3rd後", "Betting Line": line_3 or "—"},
+    ]
 )
 
 with top_action_placeholder.container():
@@ -693,7 +753,9 @@ with top_action_placeholder.container():
         """
         <div class="top-summary-box">
             <div class="top-summary-title">アクション早見表</div>
-            <div class="top-summary-sub">Heroと相手のチェンジ枚数・アクションだけ確認する欄</div>
+            <div class="top-summary-sub">
+                Preは状況別に選択肢を制限。1st以降はsummaryとbetting lineで記録。
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -705,6 +767,11 @@ with top_action_placeholder.container():
         use_container_width=True,
     )
 
+    st.dataframe(
+        line_summary_df,
+        hide_index=True,
+        use_container_width=True,
+    )
 
 # =========================
 # 現在の記録表示
@@ -757,9 +824,8 @@ with c2:
         unsafe_allow_html=True,
     )
 
-
 # =========================
-# 詳細の流れ表示
+# 詳細の流れ
 # =========================
 
 st.markdown("### 詳細の流れ")
@@ -771,51 +837,55 @@ detail_villain_3rd_lines = ""
 
 for v in villains:
     detail_villain_predraw_lines += f"V{v['no']}：{v['position']} / {v['predraw_action']}<br>"
-    detail_villain_1st_lines += f"V{v['no']}：change {v['d1_draw']} / action {v['action_after_1']}<br>"
-    detail_villain_2nd_lines += f"V{v['no']}：change {v['d2_draw']} / action {v['action_after_2']}<br>"
-    detail_villain_3rd_lines += f"V{v['no']}：change {v['d3_draw']} / action {v['action_after_3']}<br>"
+    detail_villain_1st_lines += f"V{v['no']}：change {v['d1_draw']} / summary {v['action_after_1']}<br>"
+    detail_villain_2nd_lines += f"V{v['no']}：change {v['d2_draw']} / summary {v['action_after_2']}<br>"
+    detail_villain_3rd_lines += f"V{v['no']}：change {v['d3_draw']} / summary {v['action_after_3']}<br>"
 
 st.markdown(
     f"""
     <div class="section-box">
         <b>プリドロー</b><br>
-        Hero：{position} / {cards_to_text(hand_predraw) or "—"} / {predraw_action}<br>
+        Hero：{position} / {cards_to_text(hand_predraw) or "—"}<br>
+        状況：{hero_predraw_spot}<br>
+        行動：{predraw_action}<br>
         {detail_villain_predraw_lines if detail_villain_predraw_lines else "Villain：—"}
     </div>
 
     <div class="section-box">
-        <b>1st change → bet</b><br>
+        <b>1st change → betting</b><br>
         Hero 捨て：{cards_to_text(st.session_state.hands["d1_discard"]) or "—"}<br>
         Hero 引き：{cards_to_text(st.session_state.hands["d1_draw"]) or "—"}<br>
         Hero 1st後：{cards_to_text(hand_after_1) or "—"}<br>
-        Hero action：{action_after_1}<br>
+        Hero summary：{action_after_1}<br>
+        Betting line：{line_1 or "—"}<br>
         {detail_villain_1st_lines if detail_villain_1st_lines else "Villain：—"}
     </div>
 
     <div class="section-box">
-        <b>2nd change → bet</b><br>
+        <b>2nd change → betting</b><br>
         Hero 捨て：{cards_to_text(st.session_state.hands["d2_discard"]) or "—"}<br>
         Hero 引き：{cards_to_text(st.session_state.hands["d2_draw"]) or "—"}<br>
         Hero 2nd後：{cards_to_text(hand_after_2) or "—"}<br>
-        Hero action：{action_after_2}<br>
+        Hero summary：{action_after_2}<br>
+        Betting line：{line_2 or "—"}<br>
         {detail_villain_2nd_lines if detail_villain_2nd_lines else "Villain：—"}
     </div>
 
     <div class="section-box">
-        <b>3rd change → bet</b><br>
+        <b>3rd change → betting</b><br>
         Hero 捨て：{cards_to_text(st.session_state.hands["d3_discard"]) or "—"}<br>
         Hero 引き：{cards_to_text(st.session_state.hands["d3_draw"]) or "—"}<br>
         Hero 最終：{cards_to_text(hand_final) or "—"}<br>
-        Hero action：{action_after_3}<br>
+        Hero summary：{action_after_3}<br>
+        Betting line：{line_3 or "—"}<br>
         {detail_villain_3rd_lines if detail_villain_3rd_lines else "Villain：—"}
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-
 # =========================
-# 基本情報・メモ・タグ
+# 基本情報・結果
 # =========================
 
 st.divider()
@@ -868,9 +938,8 @@ tags = st.multiselect(
 
 note = st.text_area(
     "メモ",
-    placeholder="例：3wayで相手2人が1c継続。2ndで片方pat、もう片方1c。Heroのbetが薄かったかも。"
+    placeholder="例：BBでx/callしすぎたかも。2ndで相手patに対してbetが薄い可能性。"
 )
-
 
 # =========================
 # 保存
@@ -894,22 +963,26 @@ if st.button("保存", type="primary"):
             "opponent_count": opponent_count,
 
             "predraw_hand": cards_to_text(st.session_state.hands["predraw_hand"]),
+            "hero_predraw_spot": hero_predraw_spot,
             "predraw_action": predraw_action,
 
             "d1_discard": cards_to_text(st.session_state.hands["d1_discard"]),
             "d1_draw": cards_to_text(st.session_state.hands["d1_draw"]),
             "hand_after_1": cards_to_text(hand_after_1),
             "action_after_1": action_after_1,
+            "line_1": line_1,
 
             "d2_discard": cards_to_text(st.session_state.hands["d2_discard"]),
             "d2_draw": cards_to_text(st.session_state.hands["d2_draw"]),
             "hand_after_2": cards_to_text(hand_after_2),
             "action_after_2": action_after_2,
+            "line_2": line_2,
 
             "d3_discard": cards_to_text(st.session_state.hands["d3_discard"]),
             "d3_draw": cards_to_text(st.session_state.hands["d3_draw"]),
             "final_hand": cards_to_text(hand_final),
             "action_after_3": action_after_3,
+            "line_3": line_3,
 
             "action_history": action_history,
             "result": result,
@@ -934,7 +1007,6 @@ if st.button("保存", type="primary"):
         st.success("保存しました。")
         reset_current_hand()
         st.rerun()
-
 
 # =========================
 # 保存済みデータ
