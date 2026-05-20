@@ -1067,7 +1067,7 @@ st.markdown(
     """
     <style>
     div.stButton > button {
-        width: 100%;
+        width: 125%;
         min-height: 44px;
         font-size: 18px;
         font-weight: 900;
