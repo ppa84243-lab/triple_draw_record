@@ -20,8 +20,8 @@ RANKS = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]
 SUITS = [
     {"symbol": "♠", "name": "spade"},
     {"symbol": "♥", "name": "heart"},
-    {"symbol": "♦", "name": "diamond"},
     {"symbol": "♣", "name": "club"},
+    {"symbol": "♦", "name": "diamond"},
 ]
 
 POSITIONS = ["UTG", "HJ", "CO", "BTN", "SB", "BB"]
@@ -105,16 +105,6 @@ HERO_CARD_FIELDS = [
     "d3_draw",
 ]
 
-HERO_CARD_FIELD_LABELS = {
-    "predraw_hand": "プリドローハンド",
-    "d1_discard": "1st change 捨て",
-    "d1_draw": "1st change 引き",
-    "d2_discard": "2nd change 捨て",
-    "d2_draw": "2nd change 引き",
-    "d3_discard": "3rd change 捨て",
-    "d3_draw": "3rd change 引き",
-}
-
 MAX_HAND_SIZE = {
     "27TD": 5,
     "Badugi": 4,
@@ -132,26 +122,14 @@ POSTDRAW_ACTIONS_FACING_BET = ["call", "raise", "fold"]
 RESULT_OPTIONS = ["win", "lose", "split", "fold", "unknown"]
 
 TAG_OPTIONS = [
-    "pat",
-    "1c",
-    "2c",
-    "3c",
-    "9ロー判断",
-    "8ロー判断",
-    "rough badugi",
-    "smooth badugi",
-    "tri",
-    "bluff",
-    "snow",
-    "bluff catch",
-    "thin value",
-    "mistake候補",
-    "マルチウェイ",
-    "相手pat",
-    "相手1c",
-    "相手2c",
-    "相手aggressive",
-    "相手passive",
+    "pat", "1c", "2c", "3c",
+    "9ロー判断", "8ロー判断",
+    "rough badugi", "smooth badugi",
+    "tri", "bluff", "snow",
+    "bluff catch", "thin value",
+    "mistake候補", "マルチウェイ",
+    "相手pat", "相手1c", "相手2c",
+    "相手aggressive", "相手passive",
 ]
 
 
@@ -160,20 +138,17 @@ TAG_OPTIONS = [
 # =========================
 
 def build_players(hero_position, opponent_count):
-    players = [
-        {
-            "id": "H",
-            "name": "Hero",
-            "position": hero_position,
-            "active": True,
-        }
-    ]
+    players = [{
+        "id": "H",
+        "name": "Hero",
+        "position": hero_position,
+        "active": True,
+    }]
 
     available_positions = [p for p in POSITIONS if p != hero_position]
 
     for i in range(int(opponent_count)):
         pos = available_positions[i % len(available_positions)] if available_positions else "UTG"
-
         players.append({
             "id": f"V{i + 1}",
             "name": f"V{i + 1}",
@@ -262,20 +237,17 @@ def init_state():
 
 def reset_hand_all():
     st.session_state.hero_cards = {field: [] for field in HERO_CARD_FIELDS}
-
     st.session_state.logs = {
         "pre": [],
         "1st": [],
         "2nd": [],
         "3rd": [],
     }
-
     st.session_state.changes = {
         "1st": {},
         "2nd": {},
         "3rd": {},
     }
-
     st.session_state.action_state = fresh_action_state()
     st.session_state.current_change_index = fresh_change_index()
     st.session_state.current_step = "pre_betting"
@@ -295,12 +267,49 @@ def card_id(rank, suit_symbol):
     return f"{rank}{suit_symbol}"
 
 
+def suit_name_from_symbol(symbol):
+    return {
+        "♠": "spade",
+        "♥": "heart",
+        "♣": "club",
+        "♦": "diamond",
+    }.get(symbol, "unknown")
+
+
+def suit_class(symbol):
+    return suit_name_from_symbol(symbol)
+
+
 def cards_to_text(cards):
     if not cards:
         return ""
     if PAT in cards:
         return "PAT"
     return " ".join(cards)
+
+
+def format_card_html(card):
+    if not card:
+        return ""
+
+    if card == PAT:
+        return '<span class="card-inline pat-card">PAT</span>'
+
+    rank = card[:-1]
+    suit = card[-1]
+    cls = suit_class(suit)
+
+    return f'<span class="card-inline {cls}">{rank}{suit}</span>'
+
+
+def format_cards_html(cards):
+    if not cards:
+        return "—"
+
+    if PAT in cards:
+        return '<span class="card-inline pat-card">PAT</span>'
+
+    return "".join(format_card_html(c) for c in cards)
 
 
 def flatten_used_hero_cards():
@@ -515,16 +524,12 @@ def grid_visible_key(field, key_prefix):
 
 
 def render_card_grid_for_field(field, key_prefix):
-    """
-    カード表を必要なときだけ開く。
-    PATを選択したら、自動でカード表を閉じる。
-    """
     visible_key = grid_visible_key(field, key_prefix)
 
     if visible_key not in st.session_state:
         st.session_state[visible_key] = False
 
-    open_cols = st.columns([2, 2, 8])
+    open_cols = st.columns([2, 2, 8], gap="small")
 
     with open_cols[0]:
         if st.button("カード表を開く", key=f"{key_prefix}_open_grid_{field}"):
@@ -541,7 +546,7 @@ def render_card_grid_for_field(field, key_prefix):
         return
 
     if can_use_pat(field):
-        pat_cols = st.columns([2, 10])
+        pat_cols = st.columns([2, 10], gap="small")
 
         with pat_cols[0]:
             related_discard = (
@@ -565,29 +570,40 @@ def render_card_grid_for_field(field, key_prefix):
             st.caption("PATを選ぶと、このchangeの捨て・引きは自動でスキップされ、カード表も閉じます。")
 
     for suit in SUITS:
-        cols = st.columns(len(RANKS))
+        suit_symbol = suit["symbol"]
+        suit_name = suit_name_from_symbol(suit_symbol)
+
+        row_cols = st.columns([0.55] + [1] * len(RANKS), gap="small")
+
+        with row_cols[0]:
+            st.markdown(
+                f'<div class="suit-label {suit_name}">{suit_symbol}</div>',
+                unsafe_allow_html=True,
+            )
 
         for i, rank in enumerate(RANKS):
-            card = card_id(rank, suit["symbol"])
+            card = card_id(rank, suit_symbol)
             max_cards = MAX_HAND_SIZE[st.session_state.game_type]
 
             selected_now = card in st.session_state.hero_cards[field]
             ok, _ = can_add_hero_card(card, field, max_cards)
 
-            with cols[i]:
+            with row_cols[i + 1]:
                 if selected_now:
-                    label = f"✓{card}"
+                    label = f"✓{rank}"
                     disabled = False
                 elif ok:
-                    label = card
+                    label = rank
                     disabled = False
                 else:
-                    label = "🔒"
+                    label = "×"
                     disabled = True
+
+                button_key = f"cardbtn_{key_prefix}_{field}_{suit_name}_{rank}"
 
                 clicked = st.button(
                     label,
-                    key=f"{key_prefix}_card_{card}_{field}",
+                    key=button_key,
                     disabled=disabled,
                 )
 
@@ -602,9 +618,10 @@ def render_hero_predraw_input():
     hand_size = MAX_HAND_SIZE[st.session_state.game_type]
     current_count = len(st.session_state.hero_cards["predraw_hand"])
 
-    st.write(
-        f"Hero hand：**{cards_to_text(st.session_state.hero_cards['predraw_hand']) or '—'}** "
-        f"({current_count}/{hand_size})"
+    st.markdown(
+        f'Hero hand：{format_cards_html(st.session_state.hero_cards["predraw_hand"])} '
+        f'({current_count}/{hand_size})',
+        unsafe_allow_html=True,
     )
 
     render_card_grid_for_field("predraw_hand", key_prefix="hero_predraw_inline")
@@ -630,8 +647,14 @@ def render_hero_change_input(street):
 
     st.markdown(f"#### Hero {STREET_LABELS[street]} change")
 
-    st.write(f"捨て：**{cards_to_text(st.session_state.hero_cards[discard_field]) or '—'}**")
-    st.write(f"引き：**{cards_to_text(st.session_state.hero_cards[draw_field]) or '—'}**")
+    st.markdown(
+        f'捨て：{format_cards_html(st.session_state.hero_cards[discard_field])}',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'引き：{format_cards_html(st.session_state.hero_cards[draw_field])}',
+        unsafe_allow_html=True,
+    )
     st.write(f"Hero change：**{hero_change_from_cards(street)}**")
 
     tab_discard, tab_draw = st.tabs(["捨てを入力", "引きを入力"])
@@ -719,10 +742,8 @@ def get_next_id_after(street, current_id, candidate_ids):
 
 def first_active_id(street):
     players = get_active_players_for_street(street)
-
     if not players:
         return None
-
     return players[0]["id"]
 
 
@@ -778,7 +799,6 @@ def advance_changer(street):
 
 def mark_player_folded(player_id):
     player = get_player_by_id(player_id)
-
     if player:
         player["active"] = False
 
@@ -793,10 +813,8 @@ def active_count():
 
 def street_log_text(street):
     logs = st.session_state.logs[street]
-
     if not logs:
         return "—"
-
     return " / ".join([e["text"] for e in logs])
 
 
@@ -845,13 +863,10 @@ def apply_action(street, action, record=True, auto_move=True):
 
     if action in ["bet", "raise"]:
         state["has_bet"] = True
-
         active_ids = get_ordered_ids(street)
         state["pending"] = [pid for pid in active_ids if pid != actor_id]
         state["acted"] = [actor_id]
-
-        next_id = get_next_id_after(street, actor_id, state["pending"])
-        state["current_actor_id"] = next_id
+        state["current_actor_id"] = get_next_id_after(street, actor_id, state["pending"])
         return
 
     if state["has_bet"]:
@@ -867,8 +882,7 @@ def apply_action(street, action, record=True, auto_move=True):
             complete_betting_street(street, auto_move=auto_move)
             return
 
-        next_id = get_next_id_after(street, actor_id, state["pending"])
-        state["current_actor_id"] = next_id
+        state["current_actor_id"] = get_next_id_after(street, actor_id, state["pending"])
         return
 
     if actor_id not in state["acted"]:
@@ -881,8 +895,7 @@ def apply_action(street, action, record=True, auto_move=True):
         complete_betting_street(street, auto_move=auto_move)
         return
 
-    next_id = get_next_id_after(street, actor_id, remaining)
-    state["current_actor_id"] = next_id
+    state["current_actor_id"] = get_next_id_after(street, actor_id, remaining)
 
 
 def get_available_actions(street):
@@ -984,7 +997,6 @@ def build_player_summary_df():
 
     for p in sort_players_by_order(st.session_state.players, "pre"):
         pid = p["id"]
-
         rows.append({
             "対象": "Hero" if pid == "H" else pid,
             "位置": p["position"],
@@ -1056,12 +1068,18 @@ st.markdown(
     <style>
     div.stButton > button {
         width: 100%;
-        min-height: 42px;
-        font-size: 16px;
-        font-weight: 800;
-        border-radius: 8px;
+        min-height: 44px;
+        font-size: 18px;
+        font-weight: 900;
+        border-radius: 6px;
         border: 1px solid #222;
         padding: 0;
+        margin: 0;
+    }
+
+    div[data-testid="column"] {
+        padding-left: 0.05rem !important;
+        padding-right: 0.05rem !important;
     }
 
     .top-summary-box {
@@ -1124,6 +1142,86 @@ st.markdown(
     .hand-title {
         font-weight: 700;
         margin-right: 8px;
+    }
+
+    .card-inline {
+        display: inline-block;
+        font-size: 24px;
+        font-weight: 900;
+        margin-right: 8px;
+        margin-bottom: 4px;
+        padding: 2px 6px;
+        border-radius: 5px;
+        color: white;
+    }
+
+    .spade {
+        background: #111111;
+        color: white;
+    }
+
+    .heart {
+        background: #d62828;
+        color: white;
+    }
+
+    .club {
+        background: #2a9d2f;
+        color: white;
+    }
+
+    .diamond {
+        background: #1d4ed8;
+        color: white;
+    }
+
+    .pat-card {
+        background: #666666;
+        color: white;
+    }
+
+    .suit-label {
+        font-size: 28px;
+        font-weight: 900;
+        text-align: center;
+        line-height: 44px;
+        margin-top: 2px;
+    }
+
+    /* カードボタン：数字は白、背景はスート色 */
+    div[class*="st-key-cardbtn_"][class*="_spade_"] button {
+        background: #111111 !important;
+        color: white !important;
+        border: 1px solid #111111 !important;
+    }
+
+    div[class*="st-key-cardbtn_"][class*="_heart_"] button {
+        background: #d62828 !important;
+        color: white !important;
+        border: 1px solid #d62828 !important;
+    }
+
+    div[class*="st-key-cardbtn_"][class*="_club_"] button {
+        background: #2a9d2f !important;
+        color: white !important;
+        border: 1px solid #2a9d2f !important;
+    }
+
+    div[class*="st-key-cardbtn_"][class*="_diamond_"] button {
+        background: #1d4ed8 !important;
+        color: white !important;
+        border: 1px solid #1d4ed8 !important;
+    }
+
+    div[class*="st-key-cardbtn_"] button:disabled {
+        background: #cccccc !important;
+        color: #666666 !important;
+        border: 1px solid #bbbbbb !important;
+    }
+
+    div[class*="st-key-cardbtn_"] button:focus,
+    div[class*="st-key-cardbtn_"] button:active {
+        outline: 3px solid #ffd166 !important;
     }
     </style>
     """,
@@ -1501,7 +1599,7 @@ with hand_cols[0]:
         f"""
         <div class="hand-box">
             <span class="hand-title">プリドロー：</span><br>
-            {cards_to_text(hand_predraw) or "—"}
+            {format_cards_html(hand_predraw)}
         </div>
         """,
         unsafe_allow_html=True,
@@ -1512,7 +1610,7 @@ with hand_cols[1]:
         f"""
         <div class="hand-box">
             <span class="hand-title">1st後：</span><br>
-            {cards_to_text(hand_after_1) or "—"}
+            {format_cards_html(hand_after_1)}
         </div>
         """,
         unsafe_allow_html=True,
@@ -1523,7 +1621,7 @@ with hand_cols[2]:
         f"""
         <div class="hand-box">
             <span class="hand-title">2nd後：</span><br>
-            {cards_to_text(hand_after_2) or "—"}
+            {format_cards_html(hand_after_2)}
         </div>
         """,
         unsafe_allow_html=True,
@@ -1534,7 +1632,7 @@ with hand_cols[3]:
         f"""
         <div class="hand-box">
             <span class="hand-title">最終：</span><br>
-            {cards_to_text(hand_final) or "—"}
+            {format_cards_html(hand_final)}
         </div>
         """,
         unsafe_allow_html=True,
