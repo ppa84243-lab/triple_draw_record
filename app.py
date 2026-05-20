@@ -363,6 +363,27 @@ st.markdown(
         padding: 0;
     }
 
+    .top-action-box {
+        padding: 14px 18px;
+        border-radius: 14px;
+        border: 2px solid #222222;
+        background: #fffdf5;
+        margin-bottom: 16px;
+        font-size: 16px;
+        line-height: 1.55;
+    }
+
+    .top-action-title {
+        font-size: 20px;
+        font-weight: 800;
+        margin-bottom: 8px;
+    }
+
+    .street-line {
+        padding: 6px 0;
+        border-top: 1px solid #dddddd;
+    }
+
     .hand-box {
         padding: 10px 14px;
         border-radius: 10px;
@@ -395,6 +416,9 @@ st.markdown(
 # =========================
 
 st.title("27TD & Badugi Hand History Tracker")
+
+# ここに後から現在のアクション記録を描画する
+top_action_placeholder = st.empty()
 
 left, right = st.columns([2, 1])
 
@@ -594,6 +618,69 @@ hand_final = calculate_hand_after(3)
 
 
 # =========================
+# トップのアクション記録
+# =========================
+
+villain_predraw_lines = ""
+villain_1st_lines = ""
+villain_2nd_lines = ""
+villain_3rd_lines = ""
+
+for v in villains:
+    villain_predraw_lines += f"V{v['no']} {v['position']}：{v['predraw_action']} / "
+    villain_1st_lines += f"V{v['no']}：{v['d1_draw']}・{v['action_after_1']} / "
+    villain_2nd_lines += f"V{v['no']}：{v['d2_draw']}・{v['action_after_2']} / "
+    villain_3rd_lines += f"V{v['no']}：{v['d3_draw']}・{v['action_after_3']} / "
+
+with top_action_placeholder.container():
+    st.markdown(
+        f"""
+        <div class="top-action-box">
+            <div class="top-action-title">このハンドのアクション記録</div>
+
+            <div class="street-line">
+                <b>Pre</b>：
+                Hero {position} / {cards_to_text(hand_predraw) or "—"} / {predraw_action}<br>
+                {villain_predraw_lines.rstrip(" / ") if villain_predraw_lines else "Villain：—"}
+            </div>
+
+            <div class="street-line">
+                <b>1st</b>：
+                Hero 捨て {cards_to_text(st.session_state.hands["d1_discard"]) or "—"}
+                → 引き {cards_to_text(st.session_state.hands["d1_draw"]) or "—"}
+                / {cards_to_text(hand_after_1) or "—"}
+                / {action_after_1}<br>
+                {villain_1st_lines.rstrip(" / ") if villain_1st_lines else "Villain：—"}
+            </div>
+
+            <div class="street-line">
+                <b>2nd</b>：
+                Hero 捨て {cards_to_text(st.session_state.hands["d2_discard"]) or "—"}
+                → 引き {cards_to_text(st.session_state.hands["d2_draw"]) or "—"}
+                / {cards_to_text(hand_after_2) or "—"}
+                / {action_after_2}<br>
+                {villain_2nd_lines.rstrip(" / ") if villain_2nd_lines else "Villain：—"}
+            </div>
+
+            <div class="street-line">
+                <b>3rd</b>：
+                Hero 捨て {cards_to_text(st.session_state.hands["d3_discard"]) or "—"}
+                → 引き {cards_to_text(st.session_state.hands["d3_draw"]) or "—"}
+                / 最終 {cards_to_text(hand_final) or "—"}
+                / {action_after_3}<br>
+                {villain_3rd_lines.rstrip(" / ") if villain_3rd_lines else "Villain：—"}
+            </div>
+
+            <div class="street-line">
+                <b>メモ形式履歴</b>：{action_history or "—"}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =========================
 # 現在の記録表示
 # =========================
 
@@ -646,28 +733,28 @@ with c2:
 
 
 # =========================
-# 流れ表示
+# 詳細の流れ表示
 # =========================
 
-st.markdown("### 流れ")
+st.markdown("### 詳細の流れ")
 
-villain_predraw_lines = ""
-villain_1st_lines = ""
-villain_2nd_lines = ""
-villain_3rd_lines = ""
+detail_villain_predraw_lines = ""
+detail_villain_1st_lines = ""
+detail_villain_2nd_lines = ""
+detail_villain_3rd_lines = ""
 
 for v in villains:
-    villain_predraw_lines += f"V{v['no']}：{v['position']} / {v['predraw_action']}<br>"
-    villain_1st_lines += f"V{v['no']}：change {v['d1_draw']} / action {v['action_after_1']}<br>"
-    villain_2nd_lines += f"V{v['no']}：change {v['d2_draw']} / action {v['action_after_2']}<br>"
-    villain_3rd_lines += f"V{v['no']}：change {v['d3_draw']} / action {v['action_after_3']}<br>"
+    detail_villain_predraw_lines += f"V{v['no']}：{v['position']} / {v['predraw_action']}<br>"
+    detail_villain_1st_lines += f"V{v['no']}：change {v['d1_draw']} / action {v['action_after_1']}<br>"
+    detail_villain_2nd_lines += f"V{v['no']}：change {v['d2_draw']} / action {v['action_after_2']}<br>"
+    detail_villain_3rd_lines += f"V{v['no']}：change {v['d3_draw']} / action {v['action_after_3']}<br>"
 
 st.markdown(
     f"""
     <div class="section-box">
         <b>プリドロー</b><br>
         Hero：{position} / {cards_to_text(hand_predraw) or "—"} / {predraw_action}<br>
-        {villain_predraw_lines if villain_predraw_lines else "Villain：—"}
+        {detail_villain_predraw_lines if detail_villain_predraw_lines else "Villain：—"}
     </div>
 
     <div class="section-box">
@@ -676,7 +763,7 @@ st.markdown(
         Hero 引き：{cards_to_text(st.session_state.hands["d1_draw"]) or "—"}<br>
         Hero 1st後：{cards_to_text(hand_after_1) or "—"}<br>
         Hero action：{action_after_1}<br>
-        {villain_1st_lines if villain_1st_lines else "Villain：—"}
+        {detail_villain_1st_lines if detail_villain_1st_lines else "Villain：—"}
     </div>
 
     <div class="section-box">
@@ -685,7 +772,7 @@ st.markdown(
         Hero 引き：{cards_to_text(st.session_state.hands["d2_draw"]) or "—"}<br>
         Hero 2nd後：{cards_to_text(hand_after_2) or "—"}<br>
         Hero action：{action_after_2}<br>
-        {villain_2nd_lines if villain_2nd_lines else "Villain：—"}
+        {detail_villain_2nd_lines if detail_villain_2nd_lines else "Villain：—"}
     </div>
 
     <div class="section-box">
@@ -694,7 +781,7 @@ st.markdown(
         Hero 引き：{cards_to_text(st.session_state.hands["d3_draw"]) or "—"}<br>
         Hero 最終：{cards_to_text(hand_final) or "—"}<br>
         Hero action：{action_after_3}<br>
-        {villain_3rd_lines if villain_3rd_lines else "Villain：—"}
+        {detail_villain_3rd_lines if detail_villain_3rd_lines else "Villain：—"}
     </div>
     """,
     unsafe_allow_html=True,
