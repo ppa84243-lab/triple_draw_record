@@ -342,6 +342,21 @@ def change_action_text(change_value, action_value):
     return f"{change} / {action}"
 
 
+def hero_change_text(discard_cards, draw_cards):
+    discard_text = cards_to_text(discard_cards)
+    draw_text = cards_to_text(draw_cards)
+
+    if discard_text == "PAT":
+        return "pat"
+
+    draw_count = len(draw_cards)
+
+    if draw_count == 0 and not discard_text:
+        return "—"
+
+    return f"{draw_count}c"
+
+
 # =========================
 # CSV処理
 # =========================
@@ -635,14 +650,32 @@ hand_final = calculate_hand_after(3)
 
 
 # =========================
-# トップの相手アクション早見表
+# トップのアクション早見表
 # =========================
 
-villain_rows = []
+summary_rows = []
+
+summary_rows.append({
+    "対象": "Hero",
+    "位置": compact_value(position),
+    "Pre": compact_value(predraw_action),
+    "1st": change_action_text(
+        hero_change_text(st.session_state.hands["d1_discard"], st.session_state.hands["d1_draw"]),
+        action_after_1
+    ),
+    "2nd": change_action_text(
+        hero_change_text(st.session_state.hands["d2_discard"], st.session_state.hands["d2_draw"]),
+        action_after_2
+    ),
+    "3rd": change_action_text(
+        hero_change_text(st.session_state.hands["d3_discard"], st.session_state.hands["d3_draw"]),
+        action_after_3
+    ),
+})
 
 for v in villains:
-    villain_rows.append({
-        "相手": f"V{v['no']}",
+    summary_rows.append({
+        "対象": f"V{v['no']}",
         "位置": compact_value(v["position"]),
         "Pre": compact_value(v["predraw_action"]),
         "1st": change_action_text(v["d1_draw"], v["action_after_1"]),
@@ -650,30 +683,27 @@ for v in villains:
         "3rd": change_action_text(v["d3_draw"], v["action_after_3"]),
     })
 
-villain_summary_df = pd.DataFrame(
-    villain_rows,
-    columns=["相手", "位置", "Pre", "1st", "2nd", "3rd"]
+action_summary_df = pd.DataFrame(
+    summary_rows,
+    columns=["対象", "位置", "Pre", "1st", "2nd", "3rd"]
 )
 
 with top_action_placeholder.container():
     st.markdown(
         """
         <div class="top-summary-box">
-            <div class="top-summary-title">相手アクション早見表</div>
-            <div class="top-summary-sub">相手のチェンジ枚数とアクションだけ確認する欄</div>
+            <div class="top-summary-title">アクション早見表</div>
+            <div class="top-summary-sub">Heroと相手のチェンジ枚数・アクションだけ確認する欄</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    if villain_summary_df.empty:
-        st.info("相手情報はまだありません。")
-    else:
-        st.dataframe(
-            villain_summary_df,
-            hide_index=True,
-            use_container_width=True,
-        )
+    st.dataframe(
+        action_summary_df,
+        hide_index=True,
+        use_container_width=True,
+    )
 
 
 # =========================
