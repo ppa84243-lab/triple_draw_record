@@ -224,6 +224,9 @@ def init_state():
     if "current_step" not in st.session_state:
         st.session_state.current_step = "pre_betting"
 
+    if "folded_player_ids" not in st.session_state:
+        st.session_state.folded_player_ids = set()
+
 
 def reset_hand_all():
     st.session_state.hero_cards = {field: [] for field in HERO_CARD_FIELDS}
@@ -244,6 +247,7 @@ def reset_hand_all():
     st.session_state.action_state = fresh_action_state()
     st.session_state.current_change_index = fresh_change_index()
     st.session_state.current_step = "pre_betting"
+    st.session_state.folded_player_ids = set()
 
     for p in st.session_state.players:
         p["active"] = True
@@ -650,6 +654,24 @@ def render_hero_change_input(street):
 
     st.write(f"Hero change：**{hero_change_from_cards(street)}**")
 
+    pat_cols = st.columns([1, 1, 2], gap="small")
+
+    with pat_cols[0]:
+        if st.button("PAT", key=f"hero_pat_direct_{street}"):
+            set_pat_for_hero(discard_field)
+            st.session_state[grid_visible_key(discard_field, f"{street}_discard_inline")] = False
+            st.session_state[grid_visible_key(draw_field, f"{street}_draw_inline")] = False
+            st.rerun()
+
+    with pat_cols[1]:
+        if st.button("PAT解除", key=f"hero_pat_clear_direct_{street}"):
+            clear_card_field(discard_field)
+            clear_card_field(draw_field)
+            st.rerun()
+
+    with pat_cols[2]:
+        st.caption("PATならカード表を開かずに選択できます。")
+
     tab_discard, tab_draw = st.tabs(["捨てを入力", "引きを入力"])
 
     with tab_discard:
@@ -697,13 +719,6 @@ def get_player_by_id(pid):
             return p
 
     return None
-
-
-def get_current_hero_position():
-    hero = get_player_by_id("H")
-    if hero:
-        return hero["position"]
-    return "BB"
 
 
 def sync_players_to_opponent_count():
@@ -758,6 +773,7 @@ def reset_order_state_only():
     st.session_state.action_state = fresh_action_state()
     st.session_state.current_change_index = fresh_change_index()
     st.session_state.current_step = "pre_betting"
+    st.session_state.folded_player_ids = set()
 
     for p in st.session_state.players:
         p["active"] = True
@@ -781,7 +797,12 @@ if "players_position_signature" not in st.session_state:
 
 
 def get_active_players():
-    return [p for p in st.session_state.players if p.get("active", True)]
+    folded = st.session_state.get("folded_player_ids", set())
+
+    return [
+        p for p in st.session_state.players
+        if p.get("active", True) and p["id"] not in folded
+    ]
 
 
 def get_active_players_for_street(street):
@@ -875,6 +896,11 @@ def advance_changer(street):
 
 
 def mark_player_folded(player_id):
+    if "folded_player_ids" not in st.session_state:
+        st.session_state.folded_player_ids = set()
+
+    st.session_state.folded_player_ids.add(player_id)
+
     player = get_player_by_id(player_id)
 
     if player:
@@ -995,6 +1021,8 @@ def get_available_actions(street):
 
 
 def recompute_all_from_logs():
+    st.session_state.folded_player_ids = set()
+
     for p in st.session_state.players:
         p["active"] = True
 
@@ -1208,6 +1236,36 @@ st.markdown(
         padding: 0 !important;
         margin: 0 !important;
         box-shadow: none !important;
+    }
+
+    /* アクション・チェンジボタンを横並びで大きく */
+    div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-actionbtn_"]),
+    div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-changebtn_"]) {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 0.25rem !important;
+        width: 100% !important;
+    }
+
+    div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-actionbtn_"]) > div,
+    div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-changebtn_"]) > div {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        padding-left: 0rem !important;
+        padding-right: 0rem !important;
+    }
+
+    div[class*="st-key-actionbtn_"] button,
+    div[class*="st-key-changebtn_"] button {
+        width: 100% !important;
+        min-height: 60px !important;
+        font-size: 22px !important;
+        font-weight: 900 !important;
+        border-radius: 10px !important;
+        border: 2px solid #222 !important;
+        padding: 0 !important;
+        margin: 0 !important;
     }
 
     .top-summary-box {
@@ -1554,26 +1612,33 @@ if current_step in STEP_TO_CHANGE_STREET:
             if pid not in st.session_state.changes[change_street]:
                 st.session_state.changes[change_street][pid] = "不明"
 
-            old_change = st.session_state.changes[change_street][pid]
+            current_change = st.session_state.changes[change_street][pid]
 
-            selected_change = st.selectbox(
-                f"{pid} {changer['position']} change",
-                change_options,
-                index=change_options.index(old_change) if old_change in change_options else 0,
-                key=f"current_change_{change_street}_{pid}",
-            )
+            st.write(f"{pid} {changer['position']} change：**{current_change}**")
 
-            st.session_state.changes[change_street][pid] = selected_change
+            button_options = [x for x in change_options if x != "不明"]
 
-            if selected_change == "不明":
+            change_cols = st.columns(len(button_options), gap="small")
+
+            for i, change in enumerate(button_options):
+                with change_cols[i]:
+                    label = f"✓ {change}" if current_change == change else change
+
+                    if st.button(
+                        label,
+                        key=f"changebtn_{change_street}_{pid}_{change}",
+                    ):
+                        st.session_state.changes[change_street][pid] = change
+                        advance_changer(change_street)
+                        st.rerun()
+
+            if current_change == "不明":
                 st.info("チェンジ枚数を選んでください。")
             else:
-                if selected_change != old_change:
-                    advance_changer(change_street)
-                    st.rerun()
+                st.success(f"{pid} change：{current_change}")
 
-                if st.button(f"{pid} change完了"):
-                    advance_changer(change_street)
+                if st.button(f"{pid} changeを取り消す", key=f"clear_change_{change_street}_{pid}"):
+                    st.session_state.changes[change_street][pid] = "不明"
                     st.rerun()
 
     st.markdown("#### change状況")
@@ -1634,13 +1699,13 @@ elif current_step in STEP_TO_BET_STREET:
                 action_disabled = False
 
             action_options = get_available_actions(street)
-            action_cols = st.columns(len(action_options))
+            action_cols = st.columns(len(action_options), gap="small")
 
             for i, action in enumerate(action_options):
                 with action_cols[i]:
                     if st.button(
-                        action,
-                        key=f"quick_action_{street}_{action}",
+                        action.upper(),
+                        key=f"actionbtn_{street}_{actor['id']}_{action}",
                         disabled=action_disabled,
                     ):
                         apply_action(street, action, record=True, auto_move=True)
