@@ -14,6 +14,8 @@ st.set_page_config(
 
 CSV_FILE = "hand_history.csv"
 
+PAT = "PAT"
+
 RANKS = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]
 
 SUITS = [
@@ -114,7 +116,9 @@ def card_id(rank, suit_symbol):
 def flatten_used_cards():
     used = []
     for field in FIELDS:
-        used.extend(st.session_state.hands[field])
+        for card in st.session_state.hands[field]:
+            if card != PAT:
+                used.append(card)
     return used
 
 
@@ -129,22 +133,25 @@ def calculate_hand_after(stage):
     hand = list(st.session_state.hands["predraw_hand"])
 
     if stage >= 1:
-        for c in st.session_state.hands["d1_discard"]:
-            if c in hand:
-                hand.remove(c)
-        hand.extend(st.session_state.hands["d1_draw"])
+        if PAT not in st.session_state.hands["d1_discard"]:
+            for c in st.session_state.hands["d1_discard"]:
+                if c in hand:
+                    hand.remove(c)
+            hand.extend(st.session_state.hands["d1_draw"])
 
     if stage >= 2:
-        for c in st.session_state.hands["d2_discard"]:
-            if c in hand:
-                hand.remove(c)
-        hand.extend(st.session_state.hands["d2_draw"])
+        if PAT not in st.session_state.hands["d2_discard"]:
+            for c in st.session_state.hands["d2_discard"]:
+                if c in hand:
+                    hand.remove(c)
+            hand.extend(st.session_state.hands["d2_draw"])
 
     if stage >= 3:
-        for c in st.session_state.hands["d3_discard"]:
-            if c in hand:
-                hand.remove(c)
-        hand.extend(st.session_state.hands["d3_draw"])
+        if PAT not in st.session_state.hands["d3_discard"]:
+            for c in st.session_state.hands["d3_discard"]:
+                if c in hand:
+                    hand.remove(c)
+            hand.extend(st.session_state.hands["d3_draw"])
 
     return hand
 
@@ -168,6 +175,21 @@ def current_hand_before_field(field):
 def can_add_card(card, field, max_cards):
     cards_in_field = st.session_state.hands[field]
 
+    # PAT済みなら、そのストリートのdrawにはカードを追加できない
+    if field == "d1_draw" and PAT in st.session_state.hands["d1_discard"]:
+        return False, "1stはPAT済みです"
+
+    if field == "d2_draw" and PAT in st.session_state.hands["d2_discard"]:
+        return False, "2ndはPAT済みです"
+
+    if field == "d3_draw" and PAT in st.session_state.hands["d3_discard"]:
+        return False, "3rdはPAT済みです"
+
+    # discard欄がPAT済みならカード追加不可
+    if field.endswith("_discard") and PAT in st.session_state.hands[field]:
+        return False, "PAT済みです"
+
+    # 枚数上限
     if len(cards_in_field) >= max_cards:
         return False, "枚数上限です"
 
@@ -214,8 +236,31 @@ def clear_field(field):
     st.session_state.hands[field] = []
 
 
+def set_pat(field):
+    """
+    discard欄にPATを入れる。
+    そのストリートのdraw欄は空にする。
+    """
+    if not field.endswith("_discard"):
+        st.toast("PATは捨て欄でのみ選択できます")
+        return
+
+    st.session_state.hands[field] = [PAT]
+
+    if field == "d1_discard":
+        st.session_state.hands["d1_draw"] = []
+    elif field == "d2_discard":
+        st.session_state.hands["d2_draw"] = []
+    elif field == "d3_discard":
+        st.session_state.hands["d3_draw"] = []
+
+
 def cards_to_text(cards):
-    return " ".join(cards) if cards else ""
+    if not cards:
+        return ""
+    if PAT in cards:
+        return "PAT"
+    return " ".join(cards)
 
 
 # =========================
@@ -348,7 +393,7 @@ with right:
     st.divider()
     st.subheader("操作")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         if st.button("1枚戻す"):
@@ -358,6 +403,11 @@ with right:
     with col2:
         if st.button("入力先クリア"):
             clear_field(st.session_state.selected_field)
+            st.rerun()
+
+    with col3:
+        if st.button("PAT"):
+            set_pat(st.session_state.selected_field)
             st.rerun()
 
     if st.button("このハンドをリセット"):
@@ -469,7 +519,7 @@ st.markdown(
 
     <div class="section-box">
         <b>1st change → bet</b><br>
-        捨て：{cards_to_text(st.session_state.hands["d1_discard"]) or "pat / —"}<br>
+        捨て：{cards_to_text(st.session_state.hands["d1_discard"]) or "—"}<br>
         引き：{cards_to_text(st.session_state.hands["d1_draw"]) or "—"}<br>
         1st後：{cards_to_text(hand_after_1) or "—"}<br>
         action：{action_after_1}
@@ -477,7 +527,7 @@ st.markdown(
 
     <div class="section-box">
         <b>2nd change → bet</b><br>
-        捨て：{cards_to_text(st.session_state.hands["d2_discard"]) or "pat / —"}<br>
+        捨て：{cards_to_text(st.session_state.hands["d2_discard"]) or "—"}<br>
         引き：{cards_to_text(st.session_state.hands["d2_draw"]) or "—"}<br>
         2nd後：{cards_to_text(hand_after_2) or "—"}<br>
         action：{action_after_2}
@@ -485,7 +535,7 @@ st.markdown(
 
     <div class="section-box">
         <b>3rd change → bet</b><br>
-        捨て：{cards_to_text(st.session_state.hands["d3_discard"]) or "pat / —"}<br>
+        捨て：{cards_to_text(st.session_state.hands["d3_discard"]) or "—"}<br>
         引き：{cards_to_text(st.session_state.hands["d3_draw"]) or "—"}<br>
         最終：{cards_to_text(hand_final) or "—"}<br>
         action：{action_after_3}
