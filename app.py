@@ -206,6 +206,10 @@ def can_use_pat(field):
 def can_add_card(card, field, max_cards):
     cards_in_field = st.session_state.hands[field]
 
+    # すでにその入力欄にあるカードは、再クリックで解除できるので許可扱い
+    if card in cards_in_field:
+        return True, "選択解除できます"
+
     # PAT済みなら、そのストリートのdrawにはカードを追加できない
     if field == "d1_draw" and PAT in st.session_state.hands["d1_discard"]:
         return False, "1stはPAT済みです"
@@ -237,18 +241,25 @@ def can_add_card(card, field, max_cards):
         if card not in hand_before:
             return False, "現在手札にないカードです"
 
-        if card in cards_in_field:
-            return False, "すでに選択済みです"
-
         return True, ""
 
     return True, ""
 
 
-def add_card(card):
+def toggle_card(card):
+    """
+    カードを押したときの処理。
+    - まだ選ばれていなければ追加
+    - すでに同じ入力欄で選ばれていれば解除
+    """
     field = st.session_state.selected_field
     game_type = st.session_state.game_type
     max_cards = MAX_HAND_SIZE[game_type]
+
+    # すでに選択中ならキャンセル
+    if card in st.session_state.hands[field]:
+        st.session_state.hands[field].remove(card)
+        return
 
     ok, message = can_add_card(card, field, max_cards)
 
@@ -274,32 +285,30 @@ def set_pat(field):
       そのdiscard欄にPATを入れ、対応するdraw欄を空にする。
     - draw欄でPATを押した場合：
       対応するdiscard欄にPATを入れ、そのdraw欄を空にする。
+    - すでにPATなら、もう一度PATを押すと解除。
     """
     if not can_use_pat(field):
         st.toast("PATはchangeの捨て欄または引き欄でのみ選択できます")
         return
 
-    # 捨て欄でPATを押した場合
     if field.endswith("_discard"):
         discard_field = field
         draw_field = get_draw_field_from_discard_field(field)
-
-        st.session_state.hands[discard_field] = [PAT]
-
-        if draw_field:
-            st.session_state.hands[draw_field] = []
-
-        return
-
-    # 引き欄でPATを押した場合
-    if field.endswith("_draw"):
+    else:
         draw_field = field
         discard_field = get_discard_field_from_draw_field(field)
 
-        if discard_field:
-            st.session_state.hands[discard_field] = [PAT]
+    # PAT済みなら解除
+    if PAT in st.session_state.hands[discard_field]:
+        st.session_state.hands[discard_field] = []
+        if draw_field:
             st.session_state.hands[draw_field] = []
-            return
+        return
+
+    # PATにする
+    st.session_state.hands[discard_field] = [PAT]
+    if draw_field:
+        st.session_state.hands[draw_field] = []
 
 
 def cards_to_text(cards):
@@ -407,11 +416,21 @@ with left:
     if can_use_pat(st.session_state.selected_field):
         pat_cols = st.columns([2, 11])
         with pat_cols[0]:
-            if st.button("PAT", key=f"pat_button_{st.session_state.selected_field}"):
+            current_field = st.session_state.selected_field
+            related_discard = (
+                current_field
+                if current_field.endswith("_discard")
+                else get_discard_field_from_draw_field(current_field)
+            )
+
+            pat_label = "PAT解除" if related_discard and PAT in st.session_state.hands[related_discard] else "PAT"
+
+            if st.button(pat_label, key=f"pat_button_{st.session_state.selected_field}"):
                 set_pat(st.session_state.selected_field)
                 st.rerun()
+
         with pat_cols[1]:
-            st.caption("PATを押すと、このchangeの捨て・引きは自動でスキップされます。")
+            st.caption("PATを押すと、このchangeの捨て・引きは自動でスキップされます。もう一度押すと解除できます。")
 
     # 52枚カードグリッド
     for suit in SUITS:
@@ -422,19 +441,28 @@ with left:
             field = st.session_state.selected_field
             max_cards = MAX_HAND_SIZE[st.session_state.game_type]
 
+            selected_now = card in st.session_state.hands[field]
             ok, _ = can_add_card(card, field, max_cards)
 
             with cols[i]:
-                label = card if ok else "🔒"
+                if selected_now:
+                    label = f"✓{card}"
+                    disabled = False
+                elif ok:
+                    label = card
+                    disabled = False
+                else:
+                    label = "🔒"
+                    disabled = True
 
                 clicked = st.button(
                     label,
                     key=f"card_{card}_{field}",
-                    disabled=not ok,
+                    disabled=disabled,
                 )
 
                 if clicked:
-                    add_card(card)
+                    toggle_card(card)
                     st.rerun()
 
 with right:
