@@ -172,6 +172,37 @@ def current_hand_before_field(field):
     return calculate_hand_after(3)
 
 
+def get_discard_field_from_draw_field(field):
+    if field == "d1_draw":
+        return "d1_discard"
+    if field == "d2_draw":
+        return "d2_discard"
+    if field == "d3_draw":
+        return "d3_discard"
+    return None
+
+
+def get_draw_field_from_discard_field(field):
+    if field == "d1_discard":
+        return "d1_draw"
+    if field == "d2_discard":
+        return "d2_draw"
+    if field == "d3_discard":
+        return "d3_draw"
+    return None
+
+
+def can_use_pat(field):
+    return field in [
+        "d1_discard",
+        "d1_draw",
+        "d2_discard",
+        "d2_draw",
+        "d3_discard",
+        "d3_draw",
+    ]
+
+
 def can_add_card(card, field, max_cards):
     cards_in_field = st.session_state.hands[field]
 
@@ -238,21 +269,37 @@ def clear_field(field):
 
 def set_pat(field):
     """
-    discard欄にPATを入れる。
-    そのストリートのdraw欄は空にする。
+    PATを記録する。
+    - discard欄でPATを押した場合：
+      そのdiscard欄にPATを入れ、対応するdraw欄を空にする。
+    - draw欄でPATを押した場合：
+      対応するdiscard欄にPATを入れ、そのdraw欄を空にする。
     """
-    if not field.endswith("_discard"):
-        st.toast("PATは捨て欄でのみ選択できます")
+    if not can_use_pat(field):
+        st.toast("PATはchangeの捨て欄または引き欄でのみ選択できます")
         return
 
-    st.session_state.hands[field] = [PAT]
+    # 捨て欄でPATを押した場合
+    if field.endswith("_discard"):
+        discard_field = field
+        draw_field = get_draw_field_from_discard_field(field)
 
-    if field == "d1_discard":
-        st.session_state.hands["d1_draw"] = []
-    elif field == "d2_discard":
-        st.session_state.hands["d2_draw"] = []
-    elif field == "d3_discard":
-        st.session_state.hands["d3_draw"] = []
+        st.session_state.hands[discard_field] = [PAT]
+
+        if draw_field:
+            st.session_state.hands[draw_field] = []
+
+        return
+
+    # 引き欄でPATを押した場合
+    if field.endswith("_draw"):
+        draw_field = field
+        discard_field = get_discard_field_from_draw_field(field)
+
+        if discard_field:
+            st.session_state.hands[discard_field] = [PAT]
+            st.session_state.hands[draw_field] = []
+            return
 
 
 def cards_to_text(cards):
@@ -356,6 +403,16 @@ with left:
 
     st.write(f"現在の入力先：**{FIELD_LABELS[selected_field]}**")
 
+    # PATボタンをカードエリアに表示
+    if can_use_pat(st.session_state.selected_field):
+        pat_cols = st.columns([2, 11])
+        with pat_cols[0]:
+            if st.button("PAT", key=f"pat_button_{st.session_state.selected_field}"):
+                set_pat(st.session_state.selected_field)
+                st.rerun()
+        with pat_cols[1]:
+            st.caption("PATを押すと、このchangeの捨て・引きは自動でスキップされます。")
+
     # 52枚カードグリッド
     for suit in SUITS:
         cols = st.columns(len(RANKS))
@@ -393,7 +450,7 @@ with right:
     st.divider()
     st.subheader("操作")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
         if st.button("1枚戻す"):
@@ -403,11 +460,6 @@ with right:
     with col2:
         if st.button("入力先クリア"):
             clear_field(st.session_state.selected_field)
-            st.rerun()
-
-    with col3:
-        if st.button("PAT"):
-            set_pat(st.session_state.selected_field)
             st.rerun()
 
     if st.button("このハンドをリセット"):
