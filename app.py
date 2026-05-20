@@ -1068,18 +1068,22 @@ st.markdown(
     <style>
     div.stButton > button {
         width: 100%;
-        min-height: 44px;
-        font-size: 18px;
+        min-height: 28px;
+        font-size: 13px;
         font-weight: 900;
-        border-radius: 6px;
+        border-radius: 4px;
         border: 1px solid #222;
         padding: 0;
         margin: 0;
     }
 
     div[data-testid="column"] {
-        padding-left: 0.05rem !important;
-        padding-right: 0.05rem !important;
+        padding-left: 0rem !important;
+        padding-right: 0rem !important;
+    }
+    
+    div[data-testid="stHorizontalBlock"] {
+    gap: 0.03rem !important;
     }
 
     .top-summary-box {
@@ -1181,11 +1185,11 @@ st.markdown(
     }
 
     .suit-label {
-        font-size: 28px;
+        font-size: 18px;
         font-weight: 900;
         text-align: center;
-        line-height: 44px;
-        margin-top: 2px;
+        line-height: 28px;
+        margin-top: 0px;
     }
 
     /* カードボタン：数字は白、背景はスート色 */
