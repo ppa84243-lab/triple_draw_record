@@ -582,7 +582,7 @@ def render_card_grid_for_field(field, key_prefix):
         suit_symbol = suit["symbol"]
         suit_name = suit_name_from_symbol(suit_symbol)
 
-        row_cols = st.columns([0.18] + [1] * len(RANKS), gap=None)
+        row_cols = st.columns([0.22] + [1] * len(RANKS), gap=None)
 
         with row_cols[0]:
             st.markdown(
@@ -715,6 +715,54 @@ def get_player_by_id(pid):
             return p
 
     return None
+
+
+def get_current_hero_position():
+    hero = get_player_by_id("H")
+    if hero:
+        return hero["position"]
+    return "BB"
+
+
+def rebuild_players_keep_hero_position():
+    hero_position = get_current_hero_position()
+    st.session_state.players = build_players(
+        hero_position,
+        st.session_state.opponent_count,
+    )
+
+
+def players_position_signature():
+    if "players" not in st.session_state:
+        return ""
+
+    return "|".join([f'{p["id"]}:{p["position"]}' for p in st.session_state.players])
+
+
+def reset_order_state_only():
+    st.session_state.action_state = fresh_action_state()
+    st.session_state.current_change_index = fresh_change_index()
+    st.session_state.current_step = "pre_betting"
+
+    for p in st.session_state.players:
+        p["active"] = True
+
+    st.session_state.logs = {
+        "pre": [],
+        "1st": [],
+        "2nd": [],
+        "3rd": [],
+    }
+
+    st.session_state.changes = {
+        "1st": {},
+        "2nd": {},
+        "3rd": {},
+    }
+
+
+if "players_position_signature" not in st.session_state:
+    st.session_state.players_position_signature = players_position_signature()
 
 
 def get_active_players():
@@ -930,6 +978,7 @@ def get_available_actions(street):
 
     return POSTDRAW_ACTIONS_NO_BET
 
+
 def recompute_all_from_logs():
     for p in st.session_state.players:
         p["active"] = True
@@ -1089,13 +1138,14 @@ st.markdown(
     <style>
     div.stButton > button {
         width: 100%;
-        min-height: 28px;
-        font-size: 13px;
+        min-height: 58px;
+        font-size: 24px;
         font-weight: 900;
-        border-radius: 4px;
-        border: 1px solid #222;
+        border-radius: 2px;
+        border: none;
         padding: 0;
         margin: 0;
+        box-shadow: none !important;
     }
 
     div[data-testid="column"] {
@@ -1104,7 +1154,7 @@ st.markdown(
     }
 
     div[data-testid="stHorizontalBlock"] {
-        gap: 0.03rem !important;
+        gap: 0rem !important;
     }
 
     /* カード表の行だけスマホでも横並びを維持 */
@@ -1112,7 +1162,7 @@ st.markdown(
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
-        gap: 0.02rem !important;
+        gap: 0rem !important;
         align-items: stretch !important;
     }
 
@@ -1220,14 +1270,15 @@ st.markdown(
         color: white;
     }
 
+    /* 左端のスート記号 */
     .suit-symbol {
-        font-size: 16px;
+        font-size: 22px;
         font-weight: 900;
         text-align: center;
-        line-height: 28px;
-        width: 14px;
-        min-width: 14px;
-        max-width: 14px;
+        line-height: 58px;
+        width: 20px;
+        min-width: 20px;
+        max-width: 20px;
         background: transparent !important;
     }
 
@@ -1247,34 +1298,30 @@ st.markdown(
         color: #1d4ed8 !important;
     }
 
+    /* 各スートのカードボタン色 */
     div[class*="st-key-cardbtn_"][class*="_spade_"] button {
-        background: #111111 !important;
+        background: #2f2f34 !important;
         color: white !important;
-        border: 1px solid #111111 !important;
     }
 
     div[class*="st-key-cardbtn_"][class*="_heart_"] button {
-        background: #d62828 !important;
+        background: #c9362f !important;
         color: white !important;
-        border: 1px solid #d62828 !important;
     }
 
     div[class*="st-key-cardbtn_"][class*="_club_"] button {
-        background: #2a9d2f !important;
+        background: #4ea441 !important;
         color: white !important;
-        border: 1px solid #2a9d2f !important;
     }
 
     div[class*="st-key-cardbtn_"][class*="_diamond_"] button {
-        background: #1d4ed8 !important;
+        background: #3155cc !important;
         color: white !important;
-        border: 1px solid #1d4ed8 !important;
     }
 
     div[class*="st-key-cardbtn_"] button:disabled {
-        background: #cccccc !important;
+        background: #bdbdbd !important;
         color: #666666 !important;
-        border: 1px solid #bbbbbb !important;
     }
 
     div[class*="st-key-cardbtn_"] button:focus,
@@ -1299,15 +1346,10 @@ new_signature = (
 )
 
 if new_signature != st.session_state.player_signature:
-    current_hero = get_player_by_id("H")
-    current_hero_pos = current_hero["position"] if current_hero else "BB"
-
     st.session_state.player_signature = new_signature
-    st.session_state.players = build_players(
-        current_hero_pos,
-        st.session_state.opponent_count,
-    )
+    rebuild_players_keep_hero_position()
     reset_hand_all()
+    st.session_state.players_position_signature = players_position_signature()
     st.rerun()
 
 
@@ -1338,14 +1380,9 @@ with setting_cols[1]:
 
 with setting_cols[2]:
     if st.button("プレイヤー再作成"):
-        current_hero = get_player_by_id("H")
-        current_hero_pos = current_hero["position"] if current_hero else "BB"
-
-        st.session_state.players = build_players(
-            current_hero_pos,
-            st.session_state.opponent_count,
-        )
+        rebuild_players_keep_hero_position()
         reset_hand_all()
+        st.session_state.players_position_signature = players_position_signature()
         st.rerun()
 
 
@@ -1371,6 +1408,14 @@ with st.expander("プレイヤー設定", expanded=False):
                 value=p.get("active", True),
                 key=f'player_active_{p["id"]}',
             )
+
+
+new_pos_signature = players_position_signature()
+
+if new_pos_signature != st.session_state.players_position_signature:
+    st.session_state.players_position_signature = new_pos_signature
+    reset_order_state_only()
+    st.rerun()
 
 
 # =========================
