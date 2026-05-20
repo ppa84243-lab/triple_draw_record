@@ -170,6 +170,7 @@ def fresh_action_state():
             "acted": [],
             "current_actor_id": None,
             "complete": False,
+            "current_bet": 0.0,
         }
         for street in BET_STREETS
     }
@@ -227,6 +228,34 @@ def init_state():
     if "folded_player_ids" not in st.session_state:
         st.session_state.folded_player_ids = set()
 
+    if "small_blind" not in st.session_state:
+        st.session_state.small_blind = 50.0
+
+    if "big_blind" not in st.session_state:
+        st.session_state.big_blind = 100.0
+
+    if "pot_size" not in st.session_state:
+        st.session_state.pot_size = 0.0
+
+    if "pot_history" not in st.session_state:
+        st.session_state.pot_history = {
+            "pre": 0.0,
+            "1st": 0.0,
+            "2nd": 0.0,
+            "3rd": 0.0,
+        }
+
+    if "street_contrib" not in st.session_state:
+        st.session_state.street_contrib = {
+            "pre": {},
+            "1st": {},
+            "2nd": {},
+            "3rd": {},
+        }
+
+    if "blinds_posted" not in st.session_state:
+        st.session_state.blinds_posted = False
+
 
 def reset_hand_all():
     st.session_state.hero_cards = {field: [] for field in HERO_CARD_FIELDS}
@@ -248,6 +277,8 @@ def reset_hand_all():
     st.session_state.current_change_index = fresh_change_index()
     st.session_state.current_step = "pre_betting"
     st.session_state.folded_player_ids = set()
+
+    reset_pot_state()
 
     for p in st.session_state.players:
         p["active"] = True
@@ -654,7 +685,7 @@ def render_hero_change_input(street):
 
     st.write(f"Hero change：**{hero_change_from_cards(street)}**")
 
-    pat_cols = st.columns([1, 1, 2], gap="small")
+    pat_cols = st.columns([1, 1, 2], gap=None)
 
     with pat_cols[0]:
         if st.button("PAT", key=f"hero_pat_direct_{street}"):
@@ -716,6 +747,14 @@ def sort_players_by_order(players, street):
 def get_player_by_id(pid):
     for p in st.session_state.players:
         if p["id"] == pid:
+            return p
+
+    return None
+
+
+def get_player_by_position(position):
+    for p in st.session_state.players:
+        if p["position"] == position:
             return p
 
     return None
@@ -790,6 +829,8 @@ def reset_order_state_only():
         "2nd": {},
         "3rd": {},
     }
+
+    reset_pot_state()
 
 
 if "players_position_signature" not in st.session_state:
@@ -912,6 +953,187 @@ def active_count():
 
 
 # =========================
+# Pot処理
+# =========================
+
+def get_bet_unit(street):
+    bb = float(st.session_state.big_blind)
+
+    if street in ["pre", "1st"]:
+        return bb
+
+    return bb * 2
+
+
+def reset_pot_state():
+    st.session_state.pot_size = 0.0
+
+    st.session_state.pot_history = {
+        "pre": 0.0,
+        "1st": 0.0,
+        "2nd": 0.0,
+        "3rd": 0.0,
+    }
+
+    st.session_state.street_contrib = {
+        "pre": {},
+        "1st": {},
+        "2nd": {},
+        "3rd": {},
+    }
+
+    st.session_state.blinds_posted = False
+
+
+def setup_preflop_pending_after_blinds():
+    state = st.session_state.action_state["pre"]
+
+    active_ids = get_ordered_ids("pre")
+
+    bb_player = get_player_by_position("BB")
+    bb_id = bb_player["id"] if bb_player else None
+
+    if bb_id:
+        state["pending"] = [pid for pid in active_ids if pid != bb_id]
+    else:
+        state["pending"] = active_ids
+
+    if state["pending"]:
+        state["current_actor_id"] = state["pending"][0]
+    else:
+        state["current_actor_id"] = first_active_id("pre")
+
+
+def post_blinds():
+    reset_pot_state()
+
+    sb_player = get_player_by_position("SB")
+    bb_player = get_player_by_position("BB")
+
+    sb = float(st.session_state.small_blind)
+    bb = float(st.session_state.big_blind)
+
+    if sb_player:
+        st.session_state.street_contrib["pre"][sb_player["id"]] = sb
+        st.session_state.pot_size += sb
+
+    if bb_player:
+        st.session_state.street_contrib["pre"][bb_player["id"]] = bb
+        st.session_state.pot_size += bb
+
+        st.session_state.action_state["pre"]["has_bet"] = True
+        st.session_state.action_state["pre"]["current_bet"] = bb
+
+    st.session_state.pot_history["pre"] = st.session_state.pot_size
+
+    setup_preflop_pending_after_blinds()
+
+    st.session_state.blinds_posted = True
+
+
+def get_player_street_contrib(street, player_id):
+    return float(st.session_state.street_contrib.get(street, {}).get(player_id, 0.0))
+
+
+def add_player_street_contrib(street, player_id, amount):
+    if street not in st.session_state.street_contrib:
+        st.session_state.street_contrib[street] = {}
+
+    current = get_player_street_contrib(street, player_id)
+    amount = max(0.0, float(amount))
+
+    st.session_state.street_contrib[street][player_id] = current + amount
+    st.session_state.pot_size = round(float(st.session_state.pot_size) + amount, 2)
+    st.session_state.pot_history[street] = st.session_state.pot_size
+
+
+def apply_pot_for_action(street, player_id, action):
+    state = st.session_state.action_state[street]
+    unit = get_bet_unit(street)
+
+    player_paid = get_player_street_contrib(street, player_id)
+    current_bet = float(state.get("current_bet", 0.0))
+
+    if action in ["check", "fold"]:
+        return
+
+    if action == "call":
+        to_call = max(0.0, current_bet - player_paid)
+        add_player_street_contrib(street, player_id, to_call)
+        return
+
+    if action == "bet":
+        new_bet = unit
+        to_put = max(0.0, new_bet - player_paid)
+
+        state["current_bet"] = new_bet
+        add_player_street_contrib(street, player_id, to_put)
+        return
+
+    if action == "raise":
+        new_bet = current_bet + unit
+        to_put = max(0.0, new_bet - player_paid)
+
+        state["current_bet"] = new_bet
+        add_player_street_contrib(street, player_id, to_put)
+        return
+
+
+def save_pot_snapshot(street):
+    st.session_state.pot_history[street] = float(st.session_state.pot_size)
+
+
+def render_pot_panel():
+    st.markdown("### ポット")
+
+    pot_cols = st.columns(4, gap="small")
+
+    with pot_cols[0]:
+        st.number_input(
+            "SB",
+            min_value=0.0,
+            step=50.0,
+            key="small_blind",
+        )
+
+    with pot_cols[1]:
+        st.number_input(
+            "BB",
+            min_value=0.0,
+            step=100.0,
+            key="big_blind",
+        )
+
+    with pot_cols[2]:
+        st.metric("現在ポット", st.session_state.pot_size)
+
+    with pot_cols[3]:
+        if st.button("ブラインド投入/再計算", key="post_blinds_btn"):
+            st.session_state.action_state = fresh_action_state()
+            st.session_state.logs = {
+                "pre": [],
+                "1st": [],
+                "2nd": [],
+                "3rd": [],
+            }
+            st.session_state.current_step = "pre_betting"
+            st.session_state.folded_player_ids = set()
+
+            for p in st.session_state.players:
+                p["active"] = True
+
+            post_blinds()
+            st.rerun()
+
+    st.caption(
+        f"Pre: {st.session_state.pot_history.get('pre', 0.0)} / "
+        f"1st: {st.session_state.pot_history.get('1st', 0.0)} / "
+        f"2nd: {st.session_state.pot_history.get('2nd', 0.0)} / "
+        f"3rd: {st.session_state.pot_history.get('3rd', 0.0)}"
+    )
+
+
+# =========================
 # Betting処理
 # =========================
 
@@ -925,6 +1147,8 @@ def street_log_text(street):
 
 
 def complete_betting_street(street, auto_move=True):
+    save_pot_snapshot(street)
+
     state = st.session_state.action_state[street]
     state["complete"] = True
     state["current_actor_id"] = None
@@ -957,6 +1181,9 @@ def apply_action(street, action, record=True, auto_move=True):
             "action": action,
             "text": f'{actor_id} {actor["position"]} {action}',
         })
+
+    apply_pot_for_action(street, actor_id, action)
+    save_pot_snapshot(street)
 
     if action == "fold":
         mark_player_folded(actor_id)
@@ -1021,30 +1248,43 @@ def get_available_actions(street):
 
 
 def recompute_all_from_logs():
-    st.session_state.folded_player_ids = set()
-
-    for p in st.session_state.players:
-        p["active"] = True
+    had_blinds_posted = st.session_state.get("blinds_posted", False)
 
     original_logs = {
         street: list(st.session_state.logs[street])
         for street in BET_STREETS
     }
 
+    st.session_state.folded_player_ids = set()
+
+    for p in st.session_state.players:
+        p["active"] = True
+
     st.session_state.action_state = fresh_action_state()
+    st.session_state.current_change_index = fresh_change_index()
+
+    st.session_state.logs = {
+        "pre": [],
+        "1st": [],
+        "2nd": [],
+        "3rd": [],
+    }
+
+    reset_pot_state()
+
+    if had_blinds_posted:
+        post_blinds()
 
     for street in BET_STREETS:
-        st.session_state.logs[street] = []
-
         for entry in original_logs[street]:
-            state = st.session_state.action_state[street]
+            player_id = entry["player_id"]
+            action = entry["action"]
 
-            if state["current_actor_id"] is None and not state["complete"]:
-                state["current_actor_id"] = entry["player_id"]
+            st.session_state.action_state[street]["current_actor_id"] = player_id
 
             apply_action(
                 street,
-                entry["action"],
+                action,
                 record=True,
                 auto_move=False,
             )
@@ -1179,7 +1419,6 @@ def save_data(row):
 st.markdown(
     """
     <style>
-    /* 通常ボタン */
     div.stButton > button {
         width: 100%;
         min-height: 34px;
@@ -1199,7 +1438,6 @@ st.markdown(
         gap: 0rem !important;
     }
 
-    /* カード表の行はスマホでも横並び固定 */
     div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-cardbtn_"]) {
         display: flex !important;
         flex-direction: row !important;
@@ -1238,14 +1476,14 @@ st.markdown(
         box-shadow: none !important;
     }
 
-    /* アクション・チェンジボタンを横並びで大きく */
     div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-actionbtn_"]),
     div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-changebtn_"]) {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
-        gap: 0.25rem !important;
+        gap: 0rem !important;
         width: 100% !important;
+        align-items: stretch !important;
     }
 
     div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-actionbtn_"]) > div,
@@ -1254,18 +1492,37 @@ st.markdown(
         min-width: 0 !important;
         padding-left: 0rem !important;
         padding-right: 0rem !important;
+        margin-left: 0rem !important;
+        margin-right: 0rem !important;
     }
 
-    div[class*="st-key-actionbtn_"] button,
-    div[class*="st-key-changebtn_"] button {
+    div[class*="st-key-actionbtn_"],
+    div[class*="st-key-changebtn_"] {
         width: 100% !important;
-        min-height: 60px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    div[class*="st-key-actionbtn_"] div.stButton,
+    div[class*="st-key-changebtn_"] div.stButton {
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    div[class*="st-key-actionbtn_"] div.stButton > button,
+    div[class*="st-key-changebtn_"] div.stButton > button {
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 58px !important;
+        min-height: 58px !important;
         font-size: 22px !important;
         font-weight: 900 !important;
-        border-radius: 10px !important;
-        border: 2px solid #222 !important;
+        border-radius: 2px !important;
+        border: 1px solid #222 !important;
         padding: 0 !important;
         margin: 0 !important;
+        box-shadow: none !important;
     }
 
     .top-summary-box {
@@ -1541,6 +1798,8 @@ st.dataframe(
 st.divider()
 st.subheader("進行入力")
 
+render_pot_panel()
+
 selected_step = st.selectbox(
     "現在の段階",
     FLOW_STEPS,
@@ -1618,7 +1877,7 @@ if current_step in STEP_TO_CHANGE_STREET:
 
             button_options = [x for x in change_options if x != "不明"]
 
-            change_cols = st.columns(len(button_options), gap="small")
+            change_cols = st.columns(len(button_options), gap=None)
 
             for i, change in enumerate(button_options):
                 with change_cols[i]:
@@ -1699,7 +1958,7 @@ elif current_step in STEP_TO_BET_STREET:
                 action_disabled = False
 
             action_options = get_available_actions(street)
-            action_cols = st.columns(len(action_options), gap="small")
+            action_cols = st.columns(len(action_options), gap=None)
 
             for i, action in enumerate(action_options):
                 with action_cols[i]:
@@ -1913,6 +2172,14 @@ if st.button("保存", type="primary"):
 
             "hero_position": hero_position,
             "opponent_count": st.session_state.opponent_count,
+
+            "small_blind": st.session_state.small_blind,
+            "big_blind": st.session_state.big_blind,
+            "pot_current": st.session_state.pot_size,
+            "pot_pre": st.session_state.pot_history.get("pre", 0.0),
+            "pot_1st": st.session_state.pot_history.get("1st", 0.0),
+            "pot_2nd": st.session_state.pot_history.get("2nd", 0.0),
+            "pot_3rd": st.session_state.pot_history.get("3rd", 0.0),
 
             "hero_predraw_hand": cards_to_text(st.session_state.hero_cards["predraw_hand"]),
 
