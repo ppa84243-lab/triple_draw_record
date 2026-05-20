@@ -173,6 +173,7 @@ def build_players(hero_position, opponent_count):
 
     for i in range(int(opponent_count)):
         pos = available_positions[i % len(available_positions)] if available_positions else "UTG"
+
         players.append({
             "id": f"V{i + 1}",
             "name": f"V{i + 1}",
@@ -226,9 +227,6 @@ def init_state():
     for field in HERO_CARD_FIELDS:
         if field not in st.session_state.hero_cards:
             st.session_state.hero_cards[field] = []
-
-    if "selected_card_field" not in st.session_state:
-        st.session_state.selected_card_field = "predraw_hand"
 
     if "logs" not in st.session_state:
         st.session_state.logs = {
@@ -307,10 +305,12 @@ def cards_to_text(cards):
 
 def flatten_used_hero_cards():
     used = []
+
     for field in HERO_CARD_FIELDS:
         for card in st.session_state.hero_cards[field]:
             if card != PAT:
                 used.append(card)
+
     return used
 
 
@@ -435,10 +435,7 @@ def can_add_hero_card(card, field, max_cards):
     return True, ""
 
 
-def toggle_hero_card(card, field=None):
-    if field is None:
-        field = st.session_state.selected_card_field
-
+def toggle_hero_card(card, field):
     max_cards = MAX_HAND_SIZE[st.session_state.game_type]
 
     if card in st.session_state.hero_cards[field]:
@@ -563,6 +560,33 @@ def render_card_grid_for_field(field, key_prefix):
                 if clicked:
                     toggle_hero_card(card, field)
                     st.rerun()
+
+
+def render_hero_predraw_input():
+    st.markdown("#### Hero プリドローハンド入力")
+
+    hand_size = MAX_HAND_SIZE[st.session_state.game_type]
+    current_count = len(st.session_state.hero_cards["predraw_hand"])
+
+    st.write(
+        f"Hero hand：**{cards_to_text(st.session_state.hero_cards['predraw_hand']) or '—'}** "
+        f"({current_count}/{hand_size})"
+    )
+
+    with st.expander("プリドローハンドを選択する", expanded=(current_count < hand_size)):
+        render_card_grid_for_field("predraw_hand", key_prefix="hero_predraw_inline")
+
+    op_cols = st.columns(2)
+
+    with op_cols[0]:
+        if st.button("プリドローを1枚戻す"):
+            undo_card_field("predraw_hand")
+            st.rerun()
+
+    with op_cols[1]:
+        if st.button("プリドローをクリア"):
+            clear_card_field("predraw_hand")
+            st.rerun()
 
 
 def render_hero_change_input(street):
@@ -1172,7 +1196,7 @@ st.markdown(
         <div class="top-summary-title">このハンドの早見表</div>
         <div class="top-summary-sub">
             現在の段階：{FLOW_LABELS[st.session_state.current_step]}。
-            betting完了後はchangeへ、change完了後はbettingへ自動で進みます。
+            Heroのハンド入力は、Heroの番が来たときだけ表示されます。
         </div>
     </div>
     """,
@@ -1195,297 +1219,293 @@ st.dataframe(
 
 
 # =========================
-# メイン入力
+# 進行入力
 # =========================
 
-left, right = st.columns([2, 1])
+st.divider()
+st.subheader("進行入力")
+
+selected_step = st.selectbox(
+    "現在の段階",
+    FLOW_STEPS,
+    index=FLOW_STEPS.index(st.session_state.current_step),
+    format_func=lambda x: FLOW_LABELS[x],
+)
+
+if selected_step != st.session_state.current_step:
+    st.session_state.current_step = selected_step
+
+    if selected_step in STEP_TO_BET_STREET:
+        ensure_street_started(STEP_TO_BET_STREET[selected_step])
+
+    st.rerun()
+
+current_step = st.session_state.current_step
 
 
 # =========================
-# 左：Hero ハンド入力
+# Change入力
 # =========================
 
-with left:
-    st.subheader("Hero ハンド入力")
+if current_step in STEP_TO_CHANGE_STREET:
+    change_street = STEP_TO_CHANGE_STREET[current_step]
 
-    selected_field = st.selectbox(
-        "入力先",
-        HERO_CARD_FIELDS,
-        format_func=lambda x: HERO_CARD_FIELD_LABELS[x],
-        key="selected_card_field",
+    st.markdown(
+        f"""
+        <div class="change-box">
+            <b>{STREET_LABELS[change_street]} change</b><br>
+            現在change権利があるプレイヤーだけ表示します。
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    st.write(f"現在の入力先：**{HERO_CARD_FIELD_LABELS[selected_field]}**")
-    st.write(f"選択中：**{cards_to_text(st.session_state.hero_cards[selected_field]) or '—'}**")
+    changer = get_current_changer(change_street)
 
-    with st.expander("カードを選択する", expanded=False):
-        render_card_grid_for_field(
-            st.session_state.selected_card_field,
-            key_prefix=f"left_{st.session_state.selected_card_field}",
+    if changer is None:
+        st.warning("activeなプレイヤーがいません。")
+    else:
+        pid = changer["id"]
+
+        st.markdown(
+            f"""
+            <div class="actor-box">
+                現在のchange権利：{pid} {changer["position"]}
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    card_ops = st.columns(3)
+        if pid == "H":
+            render_hero_change_input(change_street)
 
-    with card_ops[0]:
-        if st.button("1枚戻す"):
-            undo_card_field(st.session_state.selected_card_field)
-            st.rerun()
+            hero_change = hero_change_from_cards(change_street)
 
-    with card_ops[1]:
-        if st.button("入力先クリア"):
-            clear_card_field(st.session_state.selected_card_field)
-            st.rerun()
+            if hero_change == "不明":
+                st.info("Heroの捨て・引き、またはPATを入力してください。")
+            else:
+                st.success(f"Hero change：{hero_change}")
 
-    with card_ops[2]:
-        if st.button("Heroハンド全消去"):
-            for field in HERO_CARD_FIELDS:
-                st.session_state.hero_cards[field] = []
-            st.rerun()
+                if st.button("Hero change完了"):
+                    advance_changer(change_street)
+                    st.rerun()
 
-    st.divider()
-    st.subheader("Hero 手札推移")
+        else:
+            change_options = get_change_options()
 
-    hand_predraw = calculate_hero_hand_after(0)
-    hand_after_1 = calculate_hero_hand_after(1)
-    hand_after_2 = calculate_hero_hand_after(2)
-    hand_final = calculate_hero_hand_after(3)
+            if pid not in st.session_state.changes[change_street]:
+                st.session_state.changes[change_street][pid] = "不明"
 
-    c1, c2 = st.columns(2)
+            old_change = st.session_state.changes[change_street][pid]
 
-    with c1:
-        for field in HERO_CARD_FIELDS:
-            st.markdown(
-                f"""
-                <div class="hand-box">
-                    <span class="hand-title">{HERO_CARD_FIELD_LABELS[field]}：</span>
-                    {cards_to_text(st.session_state.hero_cards[field]) or "—"}
-                </div>
-                """,
-                unsafe_allow_html=True,
+            selected_change = st.selectbox(
+                f"{pid} {changer['position']} change",
+                change_options,
+                index=change_options.index(old_change) if old_change in change_options else 0,
+                key=f"current_change_{change_street}_{pid}",
             )
 
-    with c2:
+            st.session_state.changes[change_street][pid] = selected_change
+
+            if selected_change == "不明":
+                st.info("チェンジ枚数を選んでください。")
+            else:
+                if selected_change != old_change:
+                    advance_changer(change_street)
+                    st.rerun()
+
+                if st.button(f"{pid} change完了"):
+                    advance_changer(change_street)
+                    st.rerun()
+
+    st.markdown("#### change状況")
+
+    for p in sort_players_by_order(get_active_players(), change_street):
+        pid = p["id"]
+        st.write(f"{pid} {p['position']}：{player_change_for_street(pid, change_street)}")
+
+
+# =========================
+# Betting入力
+# =========================
+
+elif current_step in STEP_TO_BET_STREET:
+    street = STEP_TO_BET_STREET[current_step]
+    ensure_street_started(street)
+
+    st.write(f"現在のbetting：**{STREET_LABELS[street]}**")
+
+    state = st.session_state.action_state[street]
+
+    if state["complete"]:
         st.markdown(
             f"""
-            <div class="hand-box">
-                <span class="hand-title">プリドロー：</span>
-                {cards_to_text(hand_predraw) or "—"}
-            </div>
-
-            <div class="hand-box">
-                <span class="hand-title">1st後：</span>
-                {cards_to_text(hand_after_1) or "—"}
-            </div>
-
-            <div class="hand-box">
-                <span class="hand-title">2nd後：</span>
-                {cards_to_text(hand_after_2) or "—"}
-            </div>
-
-            <div class="hand-box">
-                <span class="hand-title">最終：</span>
-                {cards_to_text(hand_final) or "—"}
+            <div class="complete-box">
+                {STREET_LABELS[street]} betting は完了しています。
             </div>
             """,
             unsafe_allow_html=True,
         )
+    else:
+        actor = current_actor(street)
 
-
-# =========================
-# 右：進行入力
-# =========================
-
-with right:
-    st.subheader("進行入力")
-
-    selected_step = st.selectbox(
-        "現在の段階",
-        FLOW_STEPS,
-        index=FLOW_STEPS.index(st.session_state.current_step),
-        format_func=lambda x: FLOW_LABELS[x],
-    )
-
-    if selected_step != st.session_state.current_step:
-        st.session_state.current_step = selected_step
-
-        if selected_step in STEP_TO_BET_STREET:
-            ensure_street_started(STEP_TO_BET_STREET[selected_step])
-
-        st.rerun()
-
-    current_step = st.session_state.current_step
-
-    if current_step in STEP_TO_CHANGE_STREET:
-        change_street = STEP_TO_CHANGE_STREET[current_step]
-
-        st.markdown(
-            f"""
-            <div class="change-box">
-                <b>{STREET_LABELS[change_street]} change</b><br>
-                現在change権利があるプレイヤーだけ表示します。
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        changer = get_current_changer(change_street)
-
-        if changer is None:
+        if actor is None:
             st.warning("activeなプレイヤーがいません。")
         else:
-            pid = changer["id"]
-
             st.markdown(
                 f"""
                 <div class="actor-box">
-                    現在のchange権利：{pid} {changer["position"]}
+                    現在のアクション権利：{actor["id"]} {actor["position"]}
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-            if pid == "H":
-                render_hero_change_input(change_street)
+            if actor["id"] == "H" and street == "pre":
+                render_hero_predraw_input()
 
-                hero_change = hero_change_from_cards(change_street)
+                hand_size = MAX_HAND_SIZE[st.session_state.game_type]
+                current_count = len(st.session_state.hero_cards["predraw_hand"])
 
-                if hero_change == "不明":
-                    st.info("Heroの捨て・引き、またはPATを入力してください。")
+                if current_count < hand_size:
+                    st.info(f"Heroのプリドローハンドを{hand_size}枚入力すると、アクションを選べます。")
+                    action_disabled = True
                 else:
-                    st.success(f"Hero change：{hero_change}")
-
-                    if st.button("Hero change完了"):
-                        advance_changer(change_street)
-                        st.rerun()
-
+                    action_disabled = False
             else:
-                change_options = get_change_options()
+                action_disabled = False
 
-                if pid not in st.session_state.changes[change_street]:
-                    st.session_state.changes[change_street][pid] = "不明"
+            action_options = get_available_actions(street)
+            action_cols = st.columns(len(action_options))
 
-                old_change = st.session_state.changes[change_street][pid]
-
-                selected_change = st.selectbox(
-                    f"{pid} {changer['position']} change",
-                    change_options,
-                    index=change_options.index(old_change) if old_change in change_options else 0,
-                    key=f"current_change_{change_street}_{pid}",
-                )
-
-                st.session_state.changes[change_street][pid] = selected_change
-
-                if selected_change == "不明":
-                    st.info("チェンジ枚数を選んでください。")
-                else:
-                    if selected_change != old_change:
-                        advance_changer(change_street)
+            for i, action in enumerate(action_options):
+                with action_cols[i]:
+                    if st.button(
+                        action,
+                        key=f"quick_action_{street}_{action}",
+                        disabled=action_disabled,
+                    ):
+                        apply_action(street, action, record=True, auto_move=True)
                         st.rerun()
 
-                    if st.button(f"{pid} change完了"):
-                        advance_changer(change_street)
-                        st.rerun()
-
-        st.markdown("#### change状況")
-
-        for p in sort_players_by_order(get_active_players(), change_street):
-            pid = p["id"]
-            st.write(f"{pid} {p['position']}：{player_change_for_street(pid, change_street)}")
-
-    elif current_step in STEP_TO_BET_STREET:
-        street = STEP_TO_BET_STREET[current_step]
-        ensure_street_started(street)
-
-        st.write(f"現在のbetting：**{STREET_LABELS[street]}**")
-
-        state = st.session_state.action_state[street]
-
-        if state["complete"]:
-            st.markdown(
-                f"""
-                <div class="complete-box">
-                    {STREET_LABELS[street]} betting は完了しています。
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        else:
-            actor = current_actor(street)
-
-            if actor is None:
-                st.warning("activeなプレイヤーがいません。")
+            if state["has_bet"]:
+                st.caption("bet/raiseに直面中：call / raise / fold")
             else:
-                st.markdown(
-                    f"""
-                    <div class="actor-box">
-                        現在のアクション権利：{actor["id"]} {actor["position"]}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                action_options = get_available_actions(street)
-                action_cols = st.columns(len(action_options))
-
-                for i, action in enumerate(action_options):
-                    with action_cols[i]:
-                        if st.button(action, key=f"quick_action_{street}_{action}"):
-                            apply_action(street, action, record=True, auto_move=True)
-                            st.rerun()
-
-                if state["has_bet"]:
-                    st.caption("bet/raiseに直面中：call / raise / fold")
+                if street == "pre":
+                    st.caption("まだraiseなし：fold / check / call / raise")
                 else:
-                    if street == "pre":
-                        st.caption("まだraiseなし：fold / check / call / raise")
-                    else:
-                        st.caption("まだbetなし：check / bet")
+                    st.caption("まだbetなし：check / bet")
 
-        st.markdown("#### 現在のログ")
+    st.markdown("#### 現在のログ")
 
-        for s in BET_STREETS:
-            done = " ✅" if st.session_state.action_state[s]["complete"] else ""
-            st.write(f"**{STREET_LABELS[s]}{done}**：{street_log_text(s)}")
+    for s in BET_STREETS:
+        done = " ✅" if st.session_state.action_state[s]["complete"] else ""
+        st.write(f"**{STREET_LABELS[s]}{done}**：{street_log_text(s)}")
 
-        log_ops = st.columns(3)
+    log_ops = st.columns(3)
 
-        with log_ops[0]:
-            if st.button("1つ戻す"):
-                undo_action_log(street)
-                st.rerun()
-
-        with log_ops[1]:
-            if st.button("このbettingクリア"):
-                clear_action_log(street)
-                st.rerun()
-
-        with log_ops[2]:
-            if st.button("このbettingリセット"):
-                clear_action_log(street)
-                reset_street_action(street)
-                st.rerun()
-
-    else:
-        st.markdown(
-            """
-            <div class="complete-box">
-                このハンドの入力フローは完了しています。必要なら保存してください。
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    move_ops = st.columns(2)
-
-    with move_ops[0]:
-        if st.button("前の段階へ"):
-            force_prev_step()
+    with log_ops[0]:
+        if st.button("1つ戻す"):
+            undo_action_log(street)
             st.rerun()
 
-    with move_ops[1]:
-        if st.button("次の段階へ"):
-            force_next_step()
+    with log_ops[1]:
+        if st.button("このbettingクリア"):
+            clear_action_log(street)
             st.rerun()
+
+    with log_ops[2]:
+        if st.button("このbettingリセット"):
+            clear_action_log(street)
+            reset_street_action(street)
+            st.rerun()
+
+
+# =========================
+# 完了
+# =========================
+
+else:
+    st.markdown(
+        """
+        <div class="complete-box">
+            このハンドの入力フローは完了しています。必要なら保存してください。
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+move_ops = st.columns(2)
+
+with move_ops[0]:
+    if st.button("前の段階へ"):
+        force_prev_step()
+        st.rerun()
+
+with move_ops[1]:
+    if st.button("次の段階へ"):
+        force_next_step()
+        st.rerun()
+
+
+# =========================
+# Hero 手札推移
+# =========================
+
+st.divider()
+st.subheader("Hero 手札推移")
+
+hand_predraw = calculate_hero_hand_after(0)
+hand_after_1 = calculate_hero_hand_after(1)
+hand_after_2 = calculate_hero_hand_after(2)
+hand_final = calculate_hero_hand_after(3)
+
+hand_cols = st.columns(4)
+
+with hand_cols[0]:
+    st.markdown(
+        f"""
+        <div class="hand-box">
+            <span class="hand-title">プリドロー：</span><br>
+            {cards_to_text(hand_predraw) or "—"}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with hand_cols[1]:
+    st.markdown(
+        f"""
+        <div class="hand-box">
+            <span class="hand-title">1st後：</span><br>
+            {cards_to_text(hand_after_1) or "—"}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with hand_cols[2]:
+    st.markdown(
+        f"""
+        <div class="hand-box">
+            <span class="hand-title">2nd後：</span><br>
+            {cards_to_text(hand_after_2) or "—"}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with hand_cols[3]:
+    st.markdown(
+        f"""
+        <div class="hand-box">
+            <span class="hand-title">最終：</span><br>
+            {cards_to_text(hand_final) or "—"}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # =========================
