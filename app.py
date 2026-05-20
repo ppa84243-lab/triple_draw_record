@@ -206,7 +206,7 @@ def can_use_pat(field):
 def can_add_card(card, field, max_cards):
     cards_in_field = st.session_state.hands[field]
 
-    # すでにその入力欄にあるカードは、再クリックで解除できるので許可扱い
+    # すでにその入力欄にあるカードは、再クリックで解除できる
     if card in cards_in_field:
         return True, "選択解除できます"
 
@@ -256,7 +256,6 @@ def toggle_card(card):
     game_type = st.session_state.game_type
     max_cards = MAX_HAND_SIZE[game_type]
 
-    # すでに選択中ならキャンセル
     if card in st.session_state.hands[field]:
         st.session_state.hands[field].remove(card)
         return
@@ -298,15 +297,14 @@ def set_pat(field):
         draw_field = field
         discard_field = get_discard_field_from_draw_field(field)
 
-    # PAT済みなら解除
     if PAT in st.session_state.hands[discard_field]:
         st.session_state.hands[discard_field] = []
         if draw_field:
             st.session_state.hands[draw_field] = []
         return
 
-    # PATにする
     st.session_state.hands[discard_field] = [PAT]
+
     if draw_field:
         st.session_state.hands[draw_field] = []
 
@@ -466,14 +464,39 @@ with left:
                     st.rerun()
 
 with right:
-    st.subheader("基本情報")
+    st.subheader("ハンド情報")
 
-    played_date = st.date_input("日付", value=date.today())
-    tournament_name = st.text_input("大会名", placeholder="例：27TD & Badugi Mix")
     position = st.selectbox("ポジション", ["UTG", "HJ", "CO", "BTN", "SB", "BB"])
-    result = st.selectbox("結果", ["win", "lose", "split", "fold", "unknown"])
-    profit = st.number_input("収支", value=0.0, step=1.0)
-    mistake_level = st.selectbox("ミス度", ["なし", "小", "中", "大", "要検討"])
+
+    st.markdown("### アクション")
+
+    predraw_action = st.selectbox(
+        "プリドロー行動",
+        PREDRAW_ACTION_OPTIONS,
+    )
+
+    action_after_1 = st.selectbox(
+        "1st change後 action",
+        POSTDRAW_ACTION_OPTIONS,
+    )
+
+    action_after_2 = st.selectbox(
+        "2nd change後 action",
+        POSTDRAW_ACTION_OPTIONS,
+    )
+
+    action_after_3 = st.selectbox(
+        "3rd change後 action",
+        POSTDRAW_ACTION_OPTIONS,
+    )
+
+    st.markdown("### アクション履歴")
+
+    action_history = st.text_area(
+        "自由記述",
+        placeholder="例：BTN open / BB call / 1st BB 2c Hero 1c / bet call ...",
+        height=140,
+    )
 
     st.divider()
     st.subheader("操作")
@@ -502,39 +525,6 @@ hand_predraw = calculate_hand_after(0)
 hand_after_1 = calculate_hand_after(1)
 hand_after_2 = calculate_hand_after(2)
 hand_final = calculate_hand_after(3)
-
-# =========================
-# アクション入力
-# =========================
-
-st.divider()
-st.subheader("アクション記録")
-
-a1, a2, a3, a4 = st.columns(4)
-
-with a1:
-    predraw_action = st.selectbox(
-        "プリドロー行動",
-        PREDRAW_ACTION_OPTIONS,
-    )
-
-with a2:
-    action_after_1 = st.selectbox(
-        "1st change後 action",
-        POSTDRAW_ACTION_OPTIONS,
-    )
-
-with a3:
-    action_after_2 = st.selectbox(
-        "2nd change後 action",
-        POSTDRAW_ACTION_OPTIONS,
-    )
-
-with a4:
-    action_after_3 = st.selectbox(
-        "3rd change後 action",
-        POSTDRAW_ACTION_OPTIONS,
-    )
 
 # =========================
 # 現在の記録表示
@@ -593,6 +583,7 @@ st.markdown(
     f"""
     <div class="section-box">
         <b>プリドロー</b><br>
+        ポジション：{position}<br>
         ハンド：{cards_to_text(hand_predraw) or "—"}<br>
         行動：{predraw_action}
     </div>
@@ -625,10 +616,29 @@ st.markdown(
 )
 
 # =========================
-# メモ・タグ
+# 基本情報・メモ・タグ
 # =========================
 
 st.divider()
+st.subheader("基本情報・結果")
+
+b1, b2, b3, b4, b5 = st.columns(5)
+
+with b1:
+    played_date = st.date_input("日付", value=date.today())
+
+with b2:
+    tournament_name = st.text_input("大会名", placeholder="例：27TD & Badugi Mix")
+
+with b3:
+    result = st.selectbox("結果", ["win", "lose", "split", "fold", "unknown"])
+
+with b4:
+    profit = st.number_input("収支", value=0.0, step=1.0)
+
+with b5:
+    mistake_level = st.selectbox("ミス度", ["なし", "小", "中", "大", "要検討"])
+
 st.subheader("メモ・タグ")
 
 tags = st.multiselect(
@@ -694,6 +704,7 @@ if st.button("保存", type="primary"):
             "final_hand": cards_to_text(hand_final),
             "action_after_3": action_after_3,
 
+            "action_history": action_history,
             "result": result,
             "profit": profit,
             "mistake_level": mistake_level,
