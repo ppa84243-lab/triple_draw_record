@@ -573,7 +573,7 @@ def render_card_grid_for_field(field, key_prefix):
         suit_symbol = suit["symbol"]
         suit_name = suit_name_from_symbol(suit_symbol)
 
-        row_cols = st.columns([0.55] + [1] * len(RANKS), gap="small")
+        row_cols = st.columns([0.25] + [1] * len(RANKS), gap="small")
 
         with row_cols[0]:
             st.markdown(
