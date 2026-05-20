@@ -510,7 +510,36 @@ def hero_change_from_cards(street):
     return f"{len(draw)}c"
 
 
+def grid_visible_key(field, key_prefix):
+    return f"show_grid_{key_prefix}_{field}"
+
+
 def render_card_grid_for_field(field, key_prefix):
+    """
+    カード表を必要なときだけ開く。
+    PATを選択したら、自動でカード表を閉じる。
+    """
+    visible_key = grid_visible_key(field, key_prefix)
+
+    if visible_key not in st.session_state:
+        st.session_state[visible_key] = False
+
+    open_cols = st.columns([2, 2, 8])
+
+    with open_cols[0]:
+        if st.button("カード表を開く", key=f"{key_prefix}_open_grid_{field}"):
+            st.session_state[visible_key] = True
+            st.rerun()
+
+    with open_cols[1]:
+        if st.button("カード表を閉じる", key=f"{key_prefix}_close_grid_{field}"):
+            st.session_state[visible_key] = False
+            st.rerun()
+
+    if not st.session_state[visible_key]:
+        st.caption("カード表は閉じています。必要なときだけ開いてください。")
+        return
+
     if can_use_pat(field):
         pat_cols = st.columns([2, 10])
 
@@ -521,14 +550,19 @@ def render_card_grid_for_field(field, key_prefix):
                 else get_discard_field_from_draw_field(field)
             )
 
-            pat_label = "PAT解除" if related_discard and PAT in st.session_state.hero_cards[related_discard] else "PAT"
+            pat_label = (
+                "PAT解除"
+                if related_discard and PAT in st.session_state.hero_cards[related_discard]
+                else "PAT"
+            )
 
             if st.button(pat_label, key=f"{key_prefix}_pat_{field}"):
                 set_pat_for_hero(field)
+                st.session_state[visible_key] = False
                 st.rerun()
 
         with pat_cols[1]:
-            st.caption("PATを選ぶと、このchangeの捨て・引きは自動でスキップされます。")
+            st.caption("PATを選ぶと、このchangeの捨て・引きは自動でスキップされ、カード表も閉じます。")
 
     for suit in SUITS:
         cols = st.columns(len(RANKS))
@@ -573,8 +607,7 @@ def render_hero_predraw_input():
         f"({current_count}/{hand_size})"
     )
 
-    with st.expander("プリドローハンドを選択する", expanded=(current_count < hand_size)):
-        render_card_grid_for_field("predraw_hand", key_prefix="hero_predraw_inline")
+    render_card_grid_for_field("predraw_hand", key_prefix="hero_predraw_inline")
 
     op_cols = st.columns(2)
 
