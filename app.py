@@ -155,13 +155,6 @@ def flatten_used_cards():
 
 
 def calculate_hand_after(stage):
-    """
-    stage:
-    0 = プリドロー
-    1 = 1st後
-    2 = 2nd後
-    3 = 3rd後 / 最終
-    """
     hand = list(st.session_state.hands["predraw_hand"])
 
     if stage >= 1:
@@ -238,11 +231,9 @@ def can_use_pat(field):
 def can_add_card(card, field, max_cards):
     cards_in_field = st.session_state.hands[field]
 
-    # 同じ入力欄にあるカードは再クリックで解除できる
     if card in cards_in_field:
         return True, "選択解除できます"
 
-    # PAT済みなら、そのストリートのdrawにはカード追加不可
     if field == "d1_draw" and PAT in st.session_state.hands["d1_discard"]:
         return False, "1stはPAT済みです"
 
@@ -252,21 +243,17 @@ def can_add_card(card, field, max_cards):
     if field == "d3_draw" and PAT in st.session_state.hands["d3_discard"]:
         return False, "3rdはPAT済みです"
 
-    # discard欄がPAT済みならカード追加不可
     if field.endswith("_discard") and PAT in st.session_state.hands[field]:
         return False, "PAT済みです"
 
-    # 枚数上限
     if len(cards_in_field) >= max_cards:
         return False, "枚数上限です"
 
-    # プリドローハンド・引きカードは、まだ使っていないカードだけ選択可能
     if field == "predraw_hand" or field.endswith("_draw"):
         if card in flatten_used_cards():
             return False, "すでに使われています"
         return True, ""
 
-    # 捨てカードは、その時点の手札にあるカードだけ選択可能
     if field.endswith("_discard"):
         hand_before = current_hand_before_field(field)
 
@@ -279,11 +266,6 @@ def can_add_card(card, field, max_cards):
 
 
 def toggle_card(card):
-    """
-    カードを押したときの処理。
-    - まだ選ばれていなければ追加
-    - すでに同じ入力欄で選ばれていれば解除
-    """
     field = st.session_state.selected_field
     game_type = st.session_state.game_type
     max_cards = MAX_HAND_SIZE[game_type]
@@ -310,14 +292,6 @@ def clear_field(field):
 
 
 def set_pat(field):
-    """
-    PATを記録する。
-    - discard欄でPATを押した場合：
-      そのdiscard欄にPATを入れ、対応するdraw欄を空にする。
-    - draw欄でPATを押した場合：
-      対応するdiscard欄にPATを入れ、そのdraw欄を空にする。
-    - すでにPATなら、もう一度PATを押すと解除。
-    """
     if not can_use_pat(field):
         st.toast("PATはchangeの捨て欄または引き欄でのみ選択できます")
         return
@@ -410,14 +384,6 @@ st.markdown(
         background: #ffffff;
         margin-bottom: 12px;
     }
-
-    .villain-box {
-        padding: 12px;
-        border-radius: 12px;
-        border: 1px solid #dddddd;
-        background: #fafafa;
-        margin-bottom: 12px;
-    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -433,7 +399,7 @@ st.title("27TD & Badugi Hand History Tracker")
 left, right = st.columns([2, 1])
 
 with left:
-    st.subheader("カード選択")
+    st.subheader("カード入力")
 
     game_type = st.radio(
         "ゲーム",
@@ -450,59 +416,59 @@ with left:
     )
 
     st.write(f"現在の入力先：**{FIELD_LABELS[selected_field]}**")
+    st.write(f"選択中：**{cards_to_text(st.session_state.hands[selected_field]) or '—'}**")
 
-    # PATボタン
-    if can_use_pat(st.session_state.selected_field):
-        pat_cols = st.columns([2, 11])
-        with pat_cols[0]:
-            current_field = st.session_state.selected_field
-            related_discard = (
-                current_field
-                if current_field.endswith("_discard")
-                else get_discard_field_from_draw_field(current_field)
-            )
-
-            pat_label = "PAT解除" if related_discard and PAT in st.session_state.hands[related_discard] else "PAT"
-
-            if st.button(pat_label, key=f"pat_button_{st.session_state.selected_field}"):
-                set_pat(st.session_state.selected_field)
-                st.rerun()
-
-        with pat_cols[1]:
-            st.caption("PATを押すと、このchangeの捨て・引きは自動でスキップされます。もう一度押すと解除できます。")
-
-    # 52枚カードグリッド
-    for suit in SUITS:
-        cols = st.columns(len(RANKS))
-
-        for i, rank in enumerate(RANKS):
-            card = card_id(rank, suit["symbol"])
-            field = st.session_state.selected_field
-            max_cards = MAX_HAND_SIZE[st.session_state.game_type]
-
-            selected_now = card in st.session_state.hands[field]
-            ok, _ = can_add_card(card, field, max_cards)
-
-            with cols[i]:
-                if selected_now:
-                    label = f"✓{card}"
-                    disabled = False
-                elif ok:
-                    label = card
-                    disabled = False
-                else:
-                    label = "🔒"
-                    disabled = True
-
-                clicked = st.button(
-                    label,
-                    key=f"card_{card}_{field}",
-                    disabled=disabled,
+    with st.expander("カードを選択する", expanded=False):
+        if can_use_pat(st.session_state.selected_field):
+            pat_cols = st.columns([2, 11])
+            with pat_cols[0]:
+                current_field = st.session_state.selected_field
+                related_discard = (
+                    current_field
+                    if current_field.endswith("_discard")
+                    else get_discard_field_from_draw_field(current_field)
                 )
 
-                if clicked:
-                    toggle_card(card)
+                pat_label = "PAT解除" if related_discard and PAT in st.session_state.hands[related_discard] else "PAT"
+
+                if st.button(pat_label, key=f"pat_button_{st.session_state.selected_field}"):
+                    set_pat(st.session_state.selected_field)
                     st.rerun()
+
+            with pat_cols[1]:
+                st.caption("PATを押すと、このchangeの捨て・引きは自動でスキップされます。もう一度押すと解除できます。")
+
+        for suit in SUITS:
+            cols = st.columns(len(RANKS))
+
+            for i, rank in enumerate(RANKS):
+                card = card_id(rank, suit["symbol"])
+                field = st.session_state.selected_field
+                max_cards = MAX_HAND_SIZE[st.session_state.game_type]
+
+                selected_now = card in st.session_state.hands[field]
+                ok, _ = can_add_card(card, field, max_cards)
+
+                with cols[i]:
+                    if selected_now:
+                        label = f"✓{card}"
+                        disabled = False
+                    elif ok:
+                        label = card
+                        disabled = False
+                    else:
+                        label = "🔒"
+                        disabled = True
+
+                    clicked = st.button(
+                        label,
+                        key=f"card_{card}_{field}",
+                        disabled=disabled,
+                    )
+
+                    if clicked:
+                        toggle_card(card)
+                        st.rerun()
 
 with right:
     st.subheader("ハンド情報")
@@ -524,59 +490,58 @@ with right:
     for i in range(int(opponent_count)):
         villain_no = i + 1
 
-        st.markdown(f"#### Villain {villain_no}")
-
-        v_position = st.selectbox(
-            f"V{villain_no} ポジション",
-            ["不明"] + POSITIONS,
-            key=f"v{villain_no}_position",
-        )
-
-        v_predraw_action = st.selectbox(
-            f"V{villain_no} プリドロー行動",
-            PREDRAW_ACTION_OPTIONS,
-            key=f"v{villain_no}_predraw_action",
-        )
-
-        vc1, vc2 = st.columns(2)
-
-        with vc1:
-            v_d1_draw = st.selectbox(
-                f"V{villain_no} 1st change",
-                VILLAIN_DRAW_OPTIONS,
-                key=f"v{villain_no}_d1_draw",
+        with st.expander(f"Villain {villain_no}", expanded=(villain_no == 1)):
+            v_position = st.selectbox(
+                f"V{villain_no} ポジション",
+                ["不明"] + POSITIONS,
+                key=f"v{villain_no}_position",
             )
 
-            v_d2_draw = st.selectbox(
-                f"V{villain_no} 2nd change",
-                VILLAIN_DRAW_OPTIONS,
-                key=f"v{villain_no}_d2_draw",
+            v_predraw_action = st.selectbox(
+                f"V{villain_no} プリドロー行動",
+                PREDRAW_ACTION_OPTIONS,
+                key=f"v{villain_no}_predraw_action",
             )
 
-            v_d3_draw = st.selectbox(
-                f"V{villain_no} 3rd change",
-                VILLAIN_DRAW_OPTIONS,
-                key=f"v{villain_no}_d3_draw",
-            )
+            vc1, vc2 = st.columns(2)
 
-        with vc2:
-            v_action_after_1 = st.selectbox(
-                f"V{villain_no} 1st後 action",
-                VILLAIN_ACTION_OPTIONS,
-                key=f"v{villain_no}_action_after_1",
-            )
+            with vc1:
+                v_d1_draw = st.selectbox(
+                    f"V{villain_no} 1st change",
+                    VILLAIN_DRAW_OPTIONS,
+                    key=f"v{villain_no}_d1_draw",
+                )
 
-            v_action_after_2 = st.selectbox(
-                f"V{villain_no} 2nd後 action",
-                VILLAIN_ACTION_OPTIONS,
-                key=f"v{villain_no}_action_after_2",
-            )
+                v_d2_draw = st.selectbox(
+                    f"V{villain_no} 2nd change",
+                    VILLAIN_DRAW_OPTIONS,
+                    key=f"v{villain_no}_d2_draw",
+                )
 
-            v_action_after_3 = st.selectbox(
-                f"V{villain_no} 3rd後 action",
-                VILLAIN_ACTION_OPTIONS,
-                key=f"v{villain_no}_action_after_3",
-            )
+                v_d3_draw = st.selectbox(
+                    f"V{villain_no} 3rd change",
+                    VILLAIN_DRAW_OPTIONS,
+                    key=f"v{villain_no}_d3_draw",
+                )
+
+            with vc2:
+                v_action_after_1 = st.selectbox(
+                    f"V{villain_no} 1st後 action",
+                    VILLAIN_ACTION_OPTIONS,
+                    key=f"v{villain_no}_action_after_1",
+                )
+
+                v_action_after_2 = st.selectbox(
+                    f"V{villain_no} 2nd後 action",
+                    VILLAIN_ACTION_OPTIONS,
+                    key=f"v{villain_no}_action_after_2",
+                )
+
+                v_action_after_3 = st.selectbox(
+                    f"V{villain_no} 3rd後 action",
+                    VILLAIN_ACTION_OPTIONS,
+                    key=f"v{villain_no}_action_after_3",
+                )
 
         villains.append({
             "no": villain_no,
@@ -841,7 +806,6 @@ if st.button("保存", type="primary"):
             "note": note,
         }
 
-        # Villainごとの情報をCSVに展開
         for v in villains:
             no = v["no"]
             row[f"v{no}_position"] = v["position"]
