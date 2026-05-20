@@ -99,6 +99,30 @@ TAG_OPTIONS = [
 # セッション初期化
 # =========================
 
+def build_players(hero_position, opponent_count):
+    players = [
+        {
+            "id": "H",
+            "name": "Hero",
+            "position": hero_position,
+            "active": True,
+        }
+    ]
+
+    available_positions = [p for p in POSITIONS if p != hero_position]
+
+    for i in range(int(opponent_count)):
+        pos = available_positions[i % len(available_positions)] if available_positions else "UTG"
+        players.append({
+            "id": f"V{i + 1}",
+            "name": f"V{i + 1}",
+            "position": pos,
+            "active": True,
+        })
+
+    return players
+
+
 def init_state():
     if "game_type" not in st.session_state:
         st.session_state.game_type = "27TD"
@@ -109,6 +133,12 @@ def init_state():
     if "opponent_count" not in st.session_state:
         st.session_state.opponent_count = 1
 
+    if "players" not in st.session_state:
+        st.session_state.players = build_players(
+            st.session_state.hero_position,
+            st.session_state.opponent_count,
+        )
+
     if "hero_cards" not in st.session_state:
         st.session_state.hero_cards = {}
 
@@ -118,9 +148,6 @@ def init_state():
 
     if "selected_card_field" not in st.session_state:
         st.session_state.selected_card_field = "predraw_hand"
-
-    if "players" not in st.session_state:
-        st.session_state.players = []
 
     if "logs" not in st.session_state:
         st.session_state.logs = {
@@ -137,34 +164,16 @@ def init_state():
             "3rd": {},
         }
 
-
-def build_players(hero_position, opponent_count):
-    """
-    Hero + V1..Vnを作る。
-    Villainの初期ポジションは重複しないように適当に割り当てる。
-    あとでUIから変更可能。
-    """
-    players = [
-        {
-            "id": "H",
-            "name": "Hero",
-            "position": hero_position,
-            "active": True,
+    if "current_actor_index" not in st.session_state:
+        st.session_state.current_actor_index = {
+            "pre": 0,
+            "1st": 0,
+            "2nd": 0,
+            "3rd": 0,
         }
-    ]
 
-    available_positions = [p for p in POSITIONS if p != hero_position]
-
-    for i in range(int(opponent_count)):
-        pos = available_positions[i % len(available_positions)] if available_positions else "不明"
-        players.append({
-            "id": f"V{i + 1}",
-            "name": f"V{i + 1}",
-            "position": pos,
-            "active": True,
-        })
-
-    return players
+    if "player_signature" not in st.session_state:
+        st.session_state.player_signature = f"{st.session_state.game_type}_{st.session_state.hero_position}_{st.session_state.opponent_count}"
 
 
 def reset_hand_all():
@@ -179,6 +188,12 @@ def reset_hand_all():
         "1st": {},
         "2nd": {},
         "3rd": {},
+    }
+    st.session_state.current_actor_index = {
+        "pre": 0,
+        "1st": 0,
+        "2nd": 0,
+        "3rd": 0,
     }
 
     for p in st.session_state.players:
@@ -214,13 +229,6 @@ def flatten_used_hero_cards():
 
 
 def calculate_hero_hand_after(stage):
-    """
-    stage:
-    0 = predraw
-    1 = 1st後
-    2 = 2nd後
-    3 = 3rd後 / final
-    """
     hand = list(st.session_state.hero_cards["predraw_hand"])
 
     if stage >= 1:
@@ -297,11 +305,9 @@ def can_use_pat(field):
 def can_add_hero_card(card, field, max_cards):
     cards_in_field = st.session_state.hero_cards[field]
 
-    # 同じ欄のカードは再クリックで解除可能
     if card in cards_in_field:
         return True, "選択解除できます"
 
-    # PAT済みならdrawには追加不可
     if field == "d1_draw" and PAT in st.session_state.hero_cards["d1_discard"]:
         return False, "1stはPAT済みです"
 
@@ -311,20 +317,17 @@ def can_add_hero_card(card, field, max_cards):
     if field == "d3_draw" and PAT in st.session_state.hero_cards["d3_discard"]:
         return False, "3rdはPAT済みです"
 
-    # discard欄がPAT済みならカード追加不可
     if field.endswith("_discard") and PAT in st.session_state.hero_cards[field]:
         return False, "PAT済みです"
 
     if len(cards_in_field) >= max_cards:
         return False, "枚数上限です"
 
-    # プリドロー・引きカードは未使用カードのみ
     if field == "predraw_hand" or field.endswith("_draw"):
         if card in flatten_used_hero_cards():
             return False, "すでに使われています"
         return True, ""
 
-    # 捨てカードはその時点の手札からのみ
     if field.endswith("_discard"):
         hand_before = current_hero_hand_before_field(field)
 
@@ -364,14 +367,12 @@ def set_pat_for_hero(field):
         draw_field = field
         discard_field = get_discard_field_from_draw_field(field)
 
-    # PAT解除
     if PAT in st.session_state.hero_cards[discard_field]:
         st.session_state.hero_cards[discard_field] = []
         if draw_field:
             st.session_state.hero_cards[draw_field] = []
         return
 
-    # PATセット
     st.session_state.hero_cards[discard_field] = [PAT]
     if draw_field:
         st.session_state.hero_cards[draw_field] = []
@@ -442,44 +443,6 @@ def format_player_label(player):
     return f'{player["id"]} {player["position"]}{status}'
 
 
-def add_action_log(street, player_id, action):
-    player = get_player_by_id(player_id)
-    if not player:
-        return
-
-    entry = {
-        "player_id": player_id,
-        "position": player["position"],
-        "action": action,
-        "text": f'{player_id} {player["position"]} {action}',
-    }
-
-    st.session_state.logs[street].append(entry)
-
-    if action == "fold":
-        player["active"] = False
-
-
-def undo_action_log(street):
-    if not st.session_state.logs[street]:
-        return
-
-    last = st.session_state.logs[street].pop()
-
-    # foldを戻した場合はactive復活させる
-    if last["action"] == "fold":
-        player = get_player_by_id(last["player_id"])
-        if player:
-            player["active"] = True
-
-
-def clear_action_log(street):
-    # foldで消えていた人を復活させたいので、一旦全員activeに戻してから
-    # 他ストリート以前のfoldを再適用する。
-    st.session_state.logs[street] = []
-    recompute_active_players()
-
-
 def recompute_active_players():
     for p in st.session_state.players:
         p["active"] = True
@@ -492,38 +455,91 @@ def recompute_active_players():
                     player["active"] = False
 
 
+def normalize_actor_index(street):
+    active_players = get_active_players_for_street(street)
+
+    if not active_players:
+        st.session_state.current_actor_index[street] = 0
+        return
+
+    if st.session_state.current_actor_index[street] >= len(active_players):
+        st.session_state.current_actor_index[street] = 0
+
+
+def get_current_actor(street):
+    active_players = get_active_players_for_street(street)
+
+    if not active_players:
+        return None
+
+    normalize_actor_index(street)
+    return active_players[st.session_state.current_actor_index[street]]
+
+
+def advance_actor(street):
+    active_players = get_active_players_for_street(street)
+
+    if not active_players:
+        st.session_state.current_actor_index[street] = 0
+        return
+
+    st.session_state.current_actor_index[street] += 1
+
+    if st.session_state.current_actor_index[street] >= len(active_players):
+        st.session_state.current_actor_index[street] = 0
+
+
+def add_action_for_current_actor(street, action):
+    actor = get_current_actor(street)
+
+    if not actor:
+        st.toast("アクション権利があるプレイヤーがいません")
+        return
+
+    entry = {
+        "player_id": actor["id"],
+        "position": actor["position"],
+        "action": action,
+        "text": f'{actor["id"]} {actor["position"]} {action}',
+    }
+
+    st.session_state.logs[street].append(entry)
+
+    if action == "fold":
+        actor["active"] = False
+        normalize_actor_index(street)
+    else:
+        advance_actor(street)
+
+
+def undo_action_log(street):
+    if not st.session_state.logs[street]:
+        return
+
+    st.session_state.logs[street].pop()
+    recompute_active_players()
+    normalize_actor_index(street)
+
+
+def clear_action_log(street):
+    st.session_state.logs[street] = []
+    recompute_active_players()
+    st.session_state.current_actor_index[street] = 0
+
+
+def reset_actor_to_first(street):
+    st.session_state.current_actor_index[street] = 0
+
+
+def skip_to_next_actor(street):
+    advance_actor(street)
+
+
 def street_log_text(street):
     logs = st.session_state.logs[street]
     if not logs:
         return "—"
     return " / ".join([e["text"] for e in logs])
-
-
-def street_actions_short(street):
-    logs = st.session_state.logs[street]
-    if not logs:
-        return "—"
-    return " / ".join([f'{e["player_id"]} {e["action"]}' for e in logs])
-
-
-def compact_value(value):
-    if value in ["不明", "なし", "", None]:
-        return "—"
-    return value
-
-
-def change_action_text(change_value, action_value):
-    change = compact_value(change_value)
-    action = compact_value(action_value)
-
-    if change == "—" and action == "—":
-        return "—"
-    if change == "—":
-        return action
-    if action == "—":
-        return change
-
-    return f"{change} / {action}"
 
 
 def get_change_options():
@@ -545,13 +561,8 @@ def build_player_summary_df():
     for p in sort_players_by_order(st.session_state.players, "pre"):
         pid = p["id"]
 
-        if pid == "H":
-            name = "Hero"
-        else:
-            name = pid
-
         rows.append({
-            "対象": name,
+            "対象": "Hero" if pid == "H" else pid,
             "位置": p["position"],
             "状態": "active" if p.get("active", True) else "fold",
             "1st change": player_change_for_street(pid, "1st"),
@@ -574,10 +585,11 @@ def build_street_summary_df():
     for street in ["1st", "2nd", "3rd"]:
         change_parts = []
 
-        for p in get_active_players_for_street(street):
+        for p in sort_players_by_order(st.session_state.players, street):
             pid = p["id"]
             change = player_change_for_street(pid, street)
-            change_parts.append(f"{pid}:{change}")
+            status = "" if p.get("active", True) else "(fold)"
+            change_parts.append(f"{pid}{status}:{change}")
 
         rows.append({
             "Street": street,
@@ -620,8 +632,8 @@ st.markdown(
     <style>
     div.stButton > button {
         width: 100%;
-        height: 46px;
-        font-size: 20px;
+        min-height: 44px;
+        font-size: 18px;
         font-weight: 800;
         border-radius: 8px;
         border: 1px solid #222;
@@ -646,6 +658,16 @@ st.markdown(
         font-size: 14px;
         color: #555555;
         margin-bottom: 8px;
+    }
+
+    .actor-box {
+        padding: 14px 16px;
+        border-radius: 14px;
+        border: 2px solid #444;
+        background: #f8fbff;
+        margin-bottom: 12px;
+        font-size: 20px;
+        font-weight: 800;
     }
 
     .hand-box {
@@ -673,16 +695,32 @@ st.markdown(
 
 st.title("27TD & Badugi Hand History Tracker")
 
-# 初回や人数変更時のプレイヤー再構築
-current_signature = f'{st.session_state.game_type}_{st.session_state.hero_position}_{st.session_state.opponent_count}'
-if "player_signature" not in st.session_state:
-    st.session_state.player_signature = current_signature
+# 設定変更時のプレイヤー再構築
+new_signature = f'{st.session_state.game_type}_{st.session_state.hero_position}_{st.session_state.opponent_count}'
+if new_signature != st.session_state.player_signature:
+    st.session_state.player_signature = new_signature
     st.session_state.players = build_players(
         st.session_state.hero_position,
         st.session_state.opponent_count,
     )
-
-top_placeholder = st.empty()
+    st.session_state.logs = {
+        "pre": [],
+        "1st": [],
+        "2nd": [],
+        "3rd": [],
+    }
+    st.session_state.changes = {
+        "1st": {},
+        "2nd": {},
+        "3rd": {},
+    }
+    st.session_state.current_actor_index = {
+        "pre": 0,
+        "1st": 0,
+        "2nd": 0,
+        "3rd": 0,
+    }
+    st.rerun()
 
 # =========================
 # 基本設定
@@ -722,45 +760,15 @@ with setting_cols[3]:
             st.session_state.hero_position,
             st.session_state.opponent_count,
         )
-        st.session_state.logs = {
-            "pre": [],
-            "1st": [],
-            "2nd": [],
-            "3rd": [],
-        }
-        st.session_state.changes = {
-            "1st": {},
-            "2nd": {},
-            "3rd": {},
-        }
+        reset_hand_all()
         st.rerun()
-
-new_signature = f'{st.session_state.game_type}_{st.session_state.hero_position}_{st.session_state.opponent_count}'
-if new_signature != st.session_state.player_signature:
-    st.session_state.player_signature = new_signature
-    st.session_state.players = build_players(
-        st.session_state.hero_position,
-        st.session_state.opponent_count,
-    )
-    st.session_state.logs = {
-        "pre": [],
-        "1st": [],
-        "2nd": [],
-        "3rd": [],
-    }
-    st.session_state.changes = {
-        "1st": {},
-        "2nd": {},
-        "3rd": {},
-    }
-    st.rerun()
 
 # =========================
 # プレイヤー設定
 # =========================
 
 with st.expander("プレイヤー設定", expanded=False):
-    for i, p in enumerate(st.session_state.players):
+    for p in st.session_state.players:
         cols = st.columns([1, 2, 2])
 
         with cols[0]:
@@ -786,34 +794,31 @@ with st.expander("プレイヤー設定", expanded=False):
 # トップ早見表
 # =========================
 
-with top_placeholder.container():
-    st.markdown(
-        """
-        <div class="top-summary-box">
-            <div class="top-summary-title">このハンドの早見表</div>
-            <div class="top-summary-sub">
-                Heroだけハンドを記録。アクションはプレイヤーを選んで順番にログ追加。
-                foldしたプレイヤーは以後 active から外れます。
-            </div>
+st.markdown(
+    """
+    <div class="top-summary-box">
+        <div class="top-summary-title">このハンドの早見表</div>
+        <div class="top-summary-sub">
+            アクション権利があるプレイヤーが自動表示されます。ボタンを押すだけでログに追加され、次の人へ進みます。
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-    st.markdown("#### ストリート別ログ")
-    st.dataframe(
-        build_street_summary_df(),
-        hide_index=True,
-        use_container_width=True,
-    )
+st.markdown("#### ストリート別ログ")
+st.dataframe(
+    build_street_summary_df(),
+    hide_index=True,
+    use_container_width=True,
+)
 
-    st.markdown("#### プレイヤー別チェンジ")
-    st.dataframe(
-        build_player_summary_df(),
-        hide_index=True,
-        use_container_width=True,
-    )
-
+st.markdown("#### プレイヤー別チェンジ")
+st.dataframe(
+    build_player_summary_df(),
+    hide_index=True,
+    use_container_width=True,
+)
 
 # =========================
 # メイン入力
@@ -958,11 +963,11 @@ with left:
         )
 
 # =========================
-# 右：アクションログ入力
+# 右：自動アクション権利入力
 # =========================
 
 with right:
-    st.subheader("アクションログ入力")
+    st.subheader("アクション入力")
 
     street = st.selectbox(
         "ストリート",
@@ -971,52 +976,59 @@ with right:
         key="action_street",
     )
 
-    active_players_for_street = get_active_players_for_street(street)
+    actor = get_current_actor(street)
 
-    if not active_players_for_street:
+    if actor is None:
         st.warning("activeなプレイヤーがいません。")
     else:
-        player_options = [p["id"] for p in active_players_for_street]
-        player_labels = {
-            p["id"]: format_player_label(p)
-            for p in active_players_for_street
-        }
-
-        selected_player_id = st.selectbox(
-            "プレイヤー",
-            player_options,
-            format_func=lambda x: player_labels[x],
-            key=f"action_player_{street}",
+        st.markdown(
+            f"""
+            <div class="actor-box">
+                現在のアクション権利：{actor["id"]} {actor["position"]}
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         action_options = PREDRAW_ACTIONS if street == "pre" else POSTDRAW_ACTIONS
 
-        action = st.selectbox(
-            "アクション",
-            action_options,
-            key=f"action_select_{street}",
-        )
+        st.write("アクションを選択")
 
-        if st.button("アクション追加"):
-            add_action_log(street, selected_player_id, action)
-            st.rerun()
+        action_cols = st.columns(len(action_options))
+
+        for i, action in enumerate(action_options):
+            with action_cols[i]:
+                if st.button(action, key=f"quick_action_{street}_{action}"):
+                    add_action_for_current_actor(street, action)
+                    st.rerun()
+
+        st.caption("foldを押すと、そのプレイヤーは以後activeから外れます。")
 
     st.markdown("#### 現在のログ")
 
     for s in STREETS:
         st.write(f"**{STREET_LABELS[s]}**：{street_log_text(s)}")
 
-    log_ops = st.columns(2)
+    log_ops = st.columns(3)
 
     with log_ops[0]:
-        if st.button("このストリートを1つ戻す"):
+        if st.button("1つ戻す"):
             undo_action_log(street)
             st.rerun()
 
     with log_ops[1]:
-        if st.button("このストリートをクリア"):
+        if st.button("このstreetクリア"):
             clear_action_log(street)
             st.rerun()
+
+    with log_ops[2]:
+        if st.button("最初の人へ"):
+            reset_actor_to_first(street)
+            st.rerun()
+
+    if st.button("次の人へスキップ"):
+        skip_to_next_actor(street)
+        st.rerun()
 
     st.divider()
     st.subheader("チェンジ枚数入力")
@@ -1025,7 +1037,7 @@ with right:
 
     for s in ["1st", "2nd", "3rd"]:
         with st.expander(f"{s} change", expanded=(s == "1st")):
-            for p in get_active_players_for_street(s):
+            for p in sort_players_by_order(st.session_state.players, s):
                 pid = p["id"]
 
                 if pid == "H":
@@ -1058,7 +1070,7 @@ for idx, s in enumerate(STREETS):
 
         if s != "pre":
             st.markdown("**Change**")
-            for p in get_active_players_for_street(s):
+            for p in sort_players_by_order(st.session_state.players, s):
                 st.write(f'{p["id"]} {p["position"]}: {player_change_for_street(p["id"], s)}')
 
 # =========================
@@ -1145,7 +1157,6 @@ if st.button("保存", type="primary"):
             "note": note,
         }
 
-        # プレイヤー情報保存
         for p in st.session_state.players:
             pid = p["id"]
             row[f"{pid}_position"] = p["position"]
