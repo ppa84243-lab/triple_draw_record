@@ -13,7 +13,6 @@ st.set_page_config(
 )
 
 CSV_FILE = "hand_history.csv"
-
 PAT = "PAT"
 
 RANKS = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]
@@ -323,6 +322,26 @@ def cards_to_text(cards):
     return " ".join(cards)
 
 
+def compact_value(value):
+    if value in ["不明", "なし", "", None]:
+        return "—"
+    return value
+
+
+def change_action_text(change_value, action_value):
+    change = compact_value(change_value)
+    action = compact_value(action_value)
+
+    if change == "—" and action == "—":
+        return "—"
+    if change == "—":
+        return action
+    if action == "—":
+        return change
+
+    return f"{change} / {action}"
+
+
 # =========================
 # CSV処理
 # =========================
@@ -363,25 +382,24 @@ st.markdown(
         padding: 0;
     }
 
-    .top-action-box {
-        padding: 14px 18px;
+    .top-summary-box {
+        padding: 12px 16px;
         border-radius: 14px;
         border: 2px solid #222222;
         background: #fffdf5;
         margin-bottom: 16px;
-        font-size: 16px;
-        line-height: 1.55;
     }
 
-    .top-action-title {
+    .top-summary-title {
         font-size: 20px;
         font-weight: 800;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
     }
 
-    .street-line {
-        padding: 6px 0;
-        border-top: 1px solid #dddddd;
+    .top-summary-sub {
+        font-size: 14px;
+        color: #555555;
+        margin-bottom: 8px;
     }
 
     .hand-box {
@@ -417,7 +435,6 @@ st.markdown(
 
 st.title("27TD & Badugi Hand History Tracker")
 
-# ここに後から現在のアクション記録を描画する
 top_action_placeholder = st.empty()
 
 left, right = st.columns([2, 1])
@@ -618,66 +635,45 @@ hand_final = calculate_hand_after(3)
 
 
 # =========================
-# トップのアクション記録
+# トップの相手アクション早見表
 # =========================
 
-villain_predraw_lines = ""
-villain_1st_lines = ""
-villain_2nd_lines = ""
-villain_3rd_lines = ""
+villain_rows = []
 
 for v in villains:
-    villain_predraw_lines += f"V{v['no']} {v['position']}：{v['predraw_action']} / "
-    villain_1st_lines += f"V{v['no']}：{v['d1_draw']}・{v['action_after_1']} / "
-    villain_2nd_lines += f"V{v['no']}：{v['d2_draw']}・{v['action_after_2']} / "
-    villain_3rd_lines += f"V{v['no']}：{v['d3_draw']}・{v['action_after_3']} / "
+    villain_rows.append({
+        "相手": f"V{v['no']}",
+        "位置": compact_value(v["position"]),
+        "Pre": compact_value(v["predraw_action"]),
+        "1st": change_action_text(v["d1_draw"], v["action_after_1"]),
+        "2nd": change_action_text(v["d2_draw"], v["action_after_2"]),
+        "3rd": change_action_text(v["d3_draw"], v["action_after_3"]),
+    })
+
+villain_summary_df = pd.DataFrame(
+    villain_rows,
+    columns=["相手", "位置", "Pre", "1st", "2nd", "3rd"]
+)
 
 with top_action_placeholder.container():
     st.markdown(
-        f"""
-        <div class="top-action-box">
-            <div class="top-action-title">このハンドのアクション記録</div>
-
-            <div class="street-line">
-                <b>Pre</b>：
-                Hero {position} / {cards_to_text(hand_predraw) or "—"} / {predraw_action}<br>
-                {villain_predraw_lines.rstrip(" / ") if villain_predraw_lines else "Villain：—"}
-            </div>
-
-            <div class="street-line">
-                <b>1st</b>：
-                Hero 捨て {cards_to_text(st.session_state.hands["d1_discard"]) or "—"}
-                → 引き {cards_to_text(st.session_state.hands["d1_draw"]) or "—"}
-                / {cards_to_text(hand_after_1) or "—"}
-                / {action_after_1}<br>
-                {villain_1st_lines.rstrip(" / ") if villain_1st_lines else "Villain：—"}
-            </div>
-
-            <div class="street-line">
-                <b>2nd</b>：
-                Hero 捨て {cards_to_text(st.session_state.hands["d2_discard"]) or "—"}
-                → 引き {cards_to_text(st.session_state.hands["d2_draw"]) or "—"}
-                / {cards_to_text(hand_after_2) or "—"}
-                / {action_after_2}<br>
-                {villain_2nd_lines.rstrip(" / ") if villain_2nd_lines else "Villain：—"}
-            </div>
-
-            <div class="street-line">
-                <b>3rd</b>：
-                Hero 捨て {cards_to_text(st.session_state.hands["d3_discard"]) or "—"}
-                → 引き {cards_to_text(st.session_state.hands["d3_draw"]) or "—"}
-                / 最終 {cards_to_text(hand_final) or "—"}
-                / {action_after_3}<br>
-                {villain_3rd_lines.rstrip(" / ") if villain_3rd_lines else "Villain：—"}
-            </div>
-
-            <div class="street-line">
-                <b>メモ形式履歴</b>：{action_history or "—"}
-            </div>
+        """
+        <div class="top-summary-box">
+            <div class="top-summary-title">相手アクション早見表</div>
+            <div class="top-summary-sub">相手のチェンジ枚数とアクションだけ確認する欄</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    if villain_summary_df.empty:
+        st.info("相手情報はまだありません。")
+    else:
+        st.dataframe(
+            villain_summary_df,
+            hide_index=True,
+            use_container_width=True,
+        )
 
 
 # =========================
