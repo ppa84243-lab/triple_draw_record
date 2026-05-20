@@ -38,6 +38,13 @@ STREET_LABELS = {
     "3rd": "3rd",
 }
 
+NEXT_STREET = {
+    "pre": "1st",
+    "1st": "2nd",
+    "2nd": "3rd",
+    "3rd": None,
+}
+
 HERO_CARD_FIELDS = [
     "predraw_hand",
     "d1_discard",
@@ -66,8 +73,11 @@ MAX_HAND_SIZE = {
 CHANGE_OPTIONS_27TD = ["不明", "pat", "1c", "2c", "3c", "4c", "5c"]
 CHANGE_OPTIONS_BADUGI = ["不明", "pat", "1c", "2c", "3c", "4c"]
 
-PREDRAW_ACTIONS = ["fold", "check", "call", "raise"]
-POSTDRAW_ACTIONS = ["check", "bet", "call", "raise", "fold"]
+PREDRAW_ACTIONS_NO_BET = ["fold", "check", "call", "raise"]
+PREDRAW_ACTIONS_FACING_BET = ["call", "raise", "fold"]
+
+POSTDRAW_ACTIONS_NO_BET = ["check", "bet"]
+POSTDRAW_ACTIONS_FACING_BET = ["call", "raise", "fold"]
 
 RESULT_OPTIONS = ["win", "lose", "split", "fold", "unknown"]
 
@@ -123,6 +133,19 @@ def build_players(hero_position, opponent_count):
     return players
 
 
+def fresh_action_state():
+    return {
+        street: {
+            "has_bet": False,
+            "pending": [],
+            "acted": [],
+            "current_actor_id": None,
+            "complete": False,
+        }
+        for street in STREETS
+    }
+
+
 def init_state():
     if "game_type" not in st.session_state:
         st.session_state.game_type = "27TD"
@@ -164,13 +187,11 @@ def init_state():
             "3rd": {},
         }
 
-    if "current_actor_index" not in st.session_state:
-        st.session_state.current_actor_index = {
-            "pre": 0,
-            "1st": 0,
-            "2nd": 0,
-            "3rd": 0,
-        }
+    if "action_state" not in st.session_state:
+        st.session_state.action_state = fresh_action_state()
+
+    if "current_street" not in st.session_state:
+        st.session_state.current_street = "pre"
 
     if "player_signature" not in st.session_state:
         st.session_state.player_signature = f"{st.session_state.game_type}_{st.session_state.hero_position}_{st.session_state.opponent_count}"
@@ -189,12 +210,8 @@ def reset_hand_all():
         "2nd": {},
         "3rd": {},
     }
-    st.session_state.current_actor_index = {
-        "pre": 0,
-        "1st": 0,
-        "2nd": 0,
-        "3rd": 0,
-    }
+    st.session_state.action_state = fresh_action_state()
+    st.session_state.current_street = "pre"
 
     for p in st.session_state.players:
         p["active"] = True
@@ -410,7 +427,7 @@ def hero_change_from_cards(street):
 
 
 # =========================
-# プレイヤー・ログ処理
+# プレイヤー・アクション処理
 # =========================
 
 def sort_players_by_order(players, street):
@@ -438,101 +455,63 @@ def get_active_players_for_street(street):
     return sort_players_by_order(get_active_players(), street)
 
 
-def format_player_label(player):
-    status = "" if player.get("active", True) else "（fold）"
-    return f'{player["id"]} {player["position"]}{status}'
+def get_ordered_ids(street):
+    return [p["id"] for p in get_active_players_for_street(street)]
 
 
-def recompute_active_players():
-    for p in st.session_state.players:
-        p["active"] = True
+def get_next_id_after(street, current_id, candidate_ids):
+    ordered_ids = get_ordered_ids(street)
 
-    for street in STREETS:
-        for entry in st.session_state.logs[street]:
-            if entry["action"] == "fold":
-                player = get_player_by_id(entry["player_id"])
-                if player:
-                    player["active"] = False
-
-
-def normalize_actor_index(street):
-    active_players = get_active_players_for_street(street)
-
-    if not active_players:
-        st.session_state.current_actor_index[street] = 0
-        return
-
-    if st.session_state.current_actor_index[street] >= len(active_players):
-        st.session_state.current_actor_index[street] = 0
-
-
-def get_current_actor(street):
-    active_players = get_active_players_for_street(street)
-
-    if not active_players:
+    if not ordered_ids:
         return None
 
-    normalize_actor_index(street)
-    return active_players[st.session_state.current_actor_index[street]]
+    if not candidate_ids:
+        return None
+
+    if current_id not in ordered_ids:
+        return candidate_ids[0]
+
+    start = ordered_ids.index(current_id)
+
+    for offset in range(1, len(ordered_ids) + 1):
+        pid = ordered_ids[(start + offset) % len(ordered_ids)]
+        if pid in candidate_ids:
+            return pid
+
+    return candidate_ids[0]
 
 
-def advance_actor(street):
-    active_players = get_active_players_for_street(street)
+def first_active_id(street):
+    players = get_active_players_for_street(street)
+    if not players:
+        return None
+    return players[0]["id"]
 
-    if not active_players:
-        st.session_state.current_actor_index[street] = 0
+
+def ensure_street_started(street):
+    state = st.session_state.action_state[street]
+
+    if state["complete"]:
         return
 
-    st.session_state.current_actor_index[street] += 1
-
-    if st.session_state.current_actor_index[street] >= len(active_players):
-        st.session_state.current_actor_index[street] = 0
+    if state["current_actor_id"] is None:
+        state["current_actor_id"] = first_active_id(street)
 
 
-def add_action_for_current_actor(street, action):
-    actor = get_current_actor(street)
+def current_actor(street):
+    ensure_street_started(street)
+    state = st.session_state.action_state[street]
 
-    if not actor:
-        st.toast("アクション権利があるプレイヤーがいません")
-        return
+    if state["current_actor_id"] is None:
+        return None
 
-    entry = {
-        "player_id": actor["id"],
-        "position": actor["position"],
-        "action": action,
-        "text": f'{actor["id"]} {actor["position"]} {action}',
-    }
-
-    st.session_state.logs[street].append(entry)
-
-    if action == "fold":
-        actor["active"] = False
-        normalize_actor_index(street)
-    else:
-        advance_actor(street)
+    return get_player_by_id(state["current_actor_id"])
 
 
-def undo_action_log(street):
-    if not st.session_state.logs[street]:
-        return
-
-    st.session_state.logs[street].pop()
-    recompute_active_players()
-    normalize_actor_index(street)
-
-
-def clear_action_log(street):
-    st.session_state.logs[street] = []
-    recompute_active_players()
-    st.session_state.current_actor_index[street] = 0
-
-
-def reset_actor_to_first(street):
-    st.session_state.current_actor_index[street] = 0
-
-
-def skip_to_next_actor(street):
-    advance_actor(street)
+def mark_player_folded(player_id):
+    player = get_player_by_id(player_id)
+    if player:
+        player["active"] = False
 
 
 def street_log_text(street):
@@ -540,6 +519,180 @@ def street_log_text(street):
     if not logs:
         return "—"
     return " / ".join([e["text"] for e in logs])
+
+
+def complete_street(street, auto_move=True):
+    state = st.session_state.action_state[street]
+    state["complete"] = True
+    state["current_actor_id"] = None
+
+    next_street = NEXT_STREET[street]
+
+    if auto_move and next_street:
+        st.session_state.current_street = next_street
+        ensure_street_started(next_street)
+
+
+def active_count():
+    return len(get_active_players())
+
+
+def apply_action(street, action, record=True, auto_move=True):
+    actor = current_actor(street)
+
+    if actor is None:
+        st.toast("アクション権利者がいません")
+        return
+
+    actor_id = actor["id"]
+    state = st.session_state.action_state[street]
+
+    if record:
+        st.session_state.logs[street].append({
+            "player_id": actor_id,
+            "position": actor["position"],
+            "action": action,
+            "text": f'{actor_id} {actor["position"]} {action}',
+        })
+
+    if action == "fold":
+        mark_player_folded(actor_id)
+
+    # 1人しか残っていなければハンド終了扱い
+    if active_count() <= 1:
+        state["complete"] = True
+        state["current_actor_id"] = None
+        return
+
+    # bet / raise が入った場合
+    if action in ["bet", "raise"]:
+        state["has_bet"] = True
+
+        active_ids = get_ordered_ids(street)
+        state["pending"] = [pid for pid in active_ids if pid != actor_id]
+        state["acted"] = [actor_id]
+
+        next_id = get_next_id_after(street, actor_id, state["pending"])
+        state["current_actor_id"] = next_id
+        return
+
+    # すでにbet/raiseがあり、call/foldで応答した場合
+    if state["has_bet"]:
+        if actor_id in state["pending"]:
+            state["pending"].remove(actor_id)
+
+        # fold後はpendingからも消す
+        state["pending"] = [
+            pid for pid in state["pending"]
+            if get_player_by_id(pid) and get_player_by_id(pid).get("active", True)
+        ]
+
+        if not state["pending"]:
+            complete_street(street, auto_move=auto_move)
+            return
+
+        next_id = get_next_id_after(street, actor_id, state["pending"])
+        state["current_actor_id"] = next_id
+        return
+
+    # まだbetがない状態で check / call / fold した場合
+    if actor_id not in state["acted"]:
+        state["acted"].append(actor_id)
+
+    active_ids = get_ordered_ids(street)
+    remaining = [pid for pid in active_ids if pid not in state["acted"]]
+
+    if not remaining:
+        complete_street(street, auto_move=auto_move)
+        return
+
+    next_id = get_next_id_after(street, actor_id, remaining)
+    state["current_actor_id"] = next_id
+
+
+def get_available_actions(street):
+    state = st.session_state.action_state[street]
+
+    if street == "pre":
+        if state["has_bet"]:
+            return PREDRAW_ACTIONS_FACING_BET
+        return PREDRAW_ACTIONS_NO_BET
+
+    if state["has_bet"]:
+        return POSTDRAW_ACTIONS_FACING_BET
+
+    return POSTDRAW_ACTIONS_NO_BET
+
+
+def recompute_all_from_logs():
+    # activeとaction_stateをログから再構築
+    for p in st.session_state.players:
+        p["active"] = True
+
+    original_logs = {
+        street: list(st.session_state.logs[street])
+        for street in STREETS
+    }
+
+    st.session_state.action_state = fresh_action_state()
+
+    for street in STREETS:
+        st.session_state.logs[street] = []
+
+        for entry in original_logs[street]:
+            state = st.session_state.action_state[street]
+
+            if state["current_actor_id"] is None and not state["complete"]:
+                state["current_actor_id"] = entry["player_id"]
+
+            apply_action(
+                street,
+                entry["action"],
+                record=True,
+                auto_move=False,
+            )
+
+    # 元ログを維持
+    st.session_state.logs = original_logs
+
+
+def undo_action_log(street):
+    if not st.session_state.logs[street]:
+        return
+
+    st.session_state.logs[street].pop()
+    recompute_all_from_logs()
+
+    if not st.session_state.action_state[street]["complete"]:
+        st.session_state.current_street = street
+
+
+def clear_action_log(street):
+    st.session_state.logs[street] = []
+    recompute_all_from_logs()
+    st.session_state.current_street = street
+
+
+def reset_street_action(street):
+    st.session_state.action_state[street] = fresh_action_state()[street]
+    ensure_street_started(street)
+
+
+def force_next_street():
+    current = st.session_state.current_street
+    next_street = NEXT_STREET[current]
+
+    if next_street:
+        st.session_state.current_street = next_street
+        ensure_street_started(next_street)
+
+
+def force_prev_street():
+    current = st.session_state.current_street
+    idx = STREETS.index(current)
+
+    if idx > 0:
+        st.session_state.current_street = STREETS[idx - 1]
 
 
 def get_change_options():
@@ -670,6 +823,16 @@ st.markdown(
         font-weight: 800;
     }
 
+    .complete-box {
+        padding: 10px 14px;
+        border-radius: 12px;
+        border: 1px solid #3c763d;
+        background: #eef9ee;
+        margin-bottom: 12px;
+        font-size: 16px;
+        font-weight: 700;
+    }
+
     .hand-box {
         padding: 10px 14px;
         border-radius: 10px;
@@ -703,23 +866,7 @@ if new_signature != st.session_state.player_signature:
         st.session_state.hero_position,
         st.session_state.opponent_count,
     )
-    st.session_state.logs = {
-        "pre": [],
-        "1st": [],
-        "2nd": [],
-        "3rd": [],
-    }
-    st.session_state.changes = {
-        "1st": {},
-        "2nd": {},
-        "3rd": {},
-    }
-    st.session_state.current_actor_index = {
-        "pre": 0,
-        "1st": 0,
-        "2nd": 0,
-        "3rd": 0,
-    }
+    reset_hand_all()
     st.rerun()
 
 # =========================
@@ -799,7 +946,7 @@ st.markdown(
     <div class="top-summary-box">
         <div class="top-summary-title">このハンドの早見表</div>
         <div class="top-summary-sub">
-            アクション権利があるプレイヤーが自動表示されます。ボタンを押すだけでログに追加され、次の人へ進みます。
+            アクションが一周して完了したら、自動で次のストリートへ移行します。
         </div>
     </div>
     """,
@@ -969,45 +1116,70 @@ with left:
 with right:
     st.subheader("アクション入力")
 
-    street = st.selectbox(
-        "ストリート",
-        STREETS,
-        format_func=lambda x: STREET_LABELS[x],
-        key="action_street",
-    )
+    street_nav = st.columns(4)
 
-    actor = get_current_actor(street)
+    for s in STREETS:
+        with street_nav[STREETS.index(s)]:
+            label = f"▶ {STREET_LABELS[s]}" if st.session_state.current_street == s else STREET_LABELS[s]
+            if st.button(label, key=f"street_button_{s}"):
+                st.session_state.current_street = s
+                ensure_street_started(s)
+                st.rerun()
 
-    if actor is None:
-        st.warning("activeなプレイヤーがいません。")
-    else:
+    street = st.session_state.current_street
+    ensure_street_started(street)
+
+    st.write(f"現在のストリート：**{STREET_LABELS[street]}**")
+
+    state = st.session_state.action_state[street]
+
+    if state["complete"]:
         st.markdown(
             f"""
-            <div class="actor-box">
-                現在のアクション権利：{actor["id"]} {actor["position"]}
+            <div class="complete-box">
+                {STREET_LABELS[street]} は完了しています。
             </div>
             """,
             unsafe_allow_html=True,
         )
+    else:
+        actor = current_actor(street)
 
-        action_options = PREDRAW_ACTIONS if street == "pre" else POSTDRAW_ACTIONS
+        if actor is None:
+            st.warning("activeなプレイヤーがいません。")
+        else:
+            st.markdown(
+                f"""
+                <div class="actor-box">
+                    現在のアクション権利：{actor["id"]} {actor["position"]}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-        st.write("アクションを選択")
+            action_options = get_available_actions(street)
 
-        action_cols = st.columns(len(action_options))
+            action_cols = st.columns(len(action_options))
 
-        for i, action in enumerate(action_options):
-            with action_cols[i]:
-                if st.button(action, key=f"quick_action_{street}_{action}"):
-                    add_action_for_current_actor(street, action)
-                    st.rerun()
+            for i, action in enumerate(action_options):
+                with action_cols[i]:
+                    if st.button(action, key=f"quick_action_{street}_{action}"):
+                        apply_action(street, action, record=True, auto_move=True)
+                        st.rerun()
 
-        st.caption("foldを押すと、そのプレイヤーは以後activeから外れます。")
+            if state["has_bet"]:
+                st.caption("bet/raiseに直面中：call / raise / fold")
+            else:
+                if street == "pre":
+                    st.caption("まだraiseなし：fold / check / call / raise")
+                else:
+                    st.caption("まだbetなし：check / bet")
 
     st.markdown("#### 現在のログ")
 
     for s in STREETS:
-        st.write(f"**{STREET_LABELS[s]}**：{street_log_text(s)}")
+        done = " ✅" if st.session_state.action_state[s]["complete"] else ""
+        st.write(f"**{STREET_LABELS[s]}{done}**：{street_log_text(s)}")
 
     log_ops = st.columns(3)
 
@@ -1022,13 +1194,22 @@ with right:
             st.rerun()
 
     with log_ops[2]:
-        if st.button("最初の人へ"):
-            reset_actor_to_first(street)
+        if st.button("このstreetリセット"):
+            clear_action_log(street)
+            reset_street_action(street)
             st.rerun()
 
-    if st.button("次の人へスキップ"):
-        skip_to_next_actor(street)
-        st.rerun()
+    move_ops = st.columns(2)
+
+    with move_ops[0]:
+        if st.button("前のstreetへ"):
+            force_prev_street()
+            st.rerun()
+
+    with move_ops[1]:
+        if st.button("次のstreetへ"):
+            force_next_street()
+            st.rerun()
 
     st.divider()
     st.subheader("チェンジ枚数入力")
@@ -1036,7 +1217,7 @@ with right:
     change_options = get_change_options()
 
     for s in ["1st", "2nd", "3rd"]:
-        with st.expander(f"{s} change", expanded=(s == "1st")):
+        with st.expander(f"{s} change", expanded=(s == st.session_state.current_street)):
             for p in sort_players_by_order(st.session_state.players, s):
                 pid = p["id"]
 
@@ -1103,7 +1284,7 @@ tags = st.multiselect("タグ", TAG_OPTIONS)
 
 note = st.text_area(
     "メモ",
-    placeholder="例：BB vs UTG。1stでBB check / UTG bet / BB call。2nd以降のpat判断を検討。"
+    placeholder="例：BB vs UTG。PreでUTG raise / BB call。自動で1stへ移行。"
 )
 
 # =========================
