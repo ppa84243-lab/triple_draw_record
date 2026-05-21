@@ -1002,6 +1002,22 @@ def current_actor(street):
     return get_player_by_id(state["current_actor_id"])
 
 
+def get_selectable_action_players(street):
+    state = st.session_state.action_state[street]
+
+    if state["complete"]:
+        return []
+
+    active_players = get_active_players_for_street(street)
+
+    if state.get("has_bet", False):
+        pending_ids = list(state.get("pending", []))
+        return [p for p in active_players if p["id"] in pending_ids]
+
+    acted_ids = list(state.get("acted", []))
+    return [p for p in active_players if p["id"] not in acted_ids]
+
+
 def get_current_changer(street):
     active_players = sort_players_by_order(get_active_players(), street)
 
@@ -1127,7 +1143,7 @@ def add_player_street_contrib(street, player_id, amount):
 
 def add_dead_blind_to_pot(street, label, amount):
     """
-    記録対象プレイヤーとしては存在しないSB/BBをpotにだけ入れる。
+    記録対象プレイヤーとして存在しないSB/BBをpotにだけ入れる。
     Hero投入額には加算しない。
     """
     if street not in st.session_state.street_contrib:
@@ -1321,8 +1337,6 @@ def render_pot_panel():
             f"2nd {st.session_state.pot_history.get('2nd', 0.0)} / "
             f"3rd {st.session_state.pot_history.get('3rd', 0.0)}"
         )
-
-
 # =========================
 # Betting処理
 # =========================
@@ -2260,15 +2274,31 @@ elif current_step in STEP_TO_BET_STREET:
             unsafe_allow_html=True,
         )
     else:
-        actor = current_actor(street)
+        selectable_players = get_selectable_action_players(street)
 
-        if actor is None:
-            st.warning("activeなプレイヤーがいません。")
+        if not selectable_players:
+            st.warning("アクション可能なプレイヤーがいません。")
         else:
+            player_labels = [
+                f'{p["id"]} {p["position"]}'
+                for p in selectable_players
+            ]
+
+            selected_label = st.selectbox(
+                "アクションするプレイヤー",
+                player_labels,
+                key=f"selected_actor_{street}",
+            )
+
+            selected_index = player_labels.index(selected_label)
+            actor = selectable_players[selected_index]
+
+            st.session_state.action_state[street]["current_actor_id"] = actor["id"]
+
             st.markdown(
                 f"""
                 <div class="actor-box">
-                    現在のアクション権利：{actor["id"]} {actor["position"]}
+                    選択中のアクション対象：{actor["id"]} {actor["position"]}
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -2303,7 +2333,7 @@ elif current_step in STEP_TO_BET_STREET:
                         apply_action(street, action, record=True, auto_move=True)
                         st.rerun()
 
-            if state["has_bet"]:
+            if st.session_state.action_state[street]["has_bet"]:
                 st.caption("bet/raiseに直面中、またはBB option：call/check / raise / fold")
             else:
                 if street == "pre":
