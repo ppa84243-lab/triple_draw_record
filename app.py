@@ -1188,7 +1188,7 @@ def save_pot_snapshot(street):
 
 
 def render_pot_panel():
-    st.markdown("### ポット・ブラインド")
+    st.markdown("### ブラインド・スタック")
 
     structure_cols = st.columns([2, 1, 1, 1], gap="small")
 
@@ -1224,9 +1224,9 @@ def render_pot_panel():
 
     apply_blind_structure_level()
 
-    pot_cols = st.columns(5, gap="small")
+    bs_cols = st.columns(7, gap="small")
 
-    with pot_cols[0]:
+    with bs_cols[0]:
         st.number_input(
             "SB",
             min_value=0.0,
@@ -1235,7 +1235,7 @@ def render_pot_panel():
             disabled=st.session_state.blind_structure_name != "手動",
         )
 
-    with pot_cols[1]:
+    with bs_cols[1]:
         st.number_input(
             "BB",
             min_value=0.0,
@@ -1244,13 +1244,33 @@ def render_pot_panel():
             disabled=st.session_state.blind_structure_name != "手動",
         )
 
-    with pot_cols[2]:
+    with bs_cols[2]:
+        st.number_input(
+            "初期スタック",
+            min_value=0.0,
+            step=100.0,
+            key="initial_stack",
+        )
+
+    with bs_cols[3]:
+        st.metric("現在スタック", st.session_state.get("current_stack", 0.0))
+
+    with bs_cols[4]:
+        stack_diff = (
+            float(st.session_state.get("current_stack", 0.0))
+            - float(st.session_state.get("initial_stack", 0.0))
+        )
+        st.metric("スタック差分", stack_diff)
+
+    with bs_cols[5]:
         st.metric("現在ポット", st.session_state.pot_size)
 
-    with pot_cols[3]:
+    with bs_cols[6]:
         st.metric("Hero投入額", st.session_state.get("hero_invested", 0.0))
 
-    with pot_cols[4]:
+    btn_cols = st.columns([1, 1, 2], gap="small")
+
+    with btn_cols[0]:
         if st.button("ブラインド投入/再計算", key="post_blinds_btn"):
             st.session_state.action_state = fresh_action_state()
             st.session_state.logs = {
@@ -1268,41 +1288,18 @@ def render_pot_panel():
             post_blinds()
             st.rerun()
 
-    st.caption(
-        f"Pre: {st.session_state.pot_history.get('pre', 0.0)} / "
-        f"1st: {st.session_state.pot_history.get('1st', 0.0)} / "
-        f"2nd: {st.session_state.pot_history.get('2nd', 0.0)} / "
-        f"3rd: {st.session_state.pot_history.get('3rd', 0.0)}"
-    )
-
-
-def render_stack_panel():
-    st.markdown("### スタック")
-
-    stack_cols = st.columns(4, gap="small")
-
-    with stack_cols[0]:
-        st.number_input(
-            "初期スタック",
-            min_value=0.0,
-            step=100.0,
-            key="initial_stack",
-        )
-
-    with stack_cols[1]:
-        st.metric("現在スタック", st.session_state.get("current_stack", 0.0))
-
-    with stack_cols[2]:
-        stack_diff = (
-            float(st.session_state.get("current_stack", 0.0))
-            - float(st.session_state.get("initial_stack", 0.0))
-        )
-        st.metric("スタック差分", stack_diff)
-
-    with stack_cols[3]:
+    with btn_cols[1]:
         if st.button("現在スタックを初期スタックに合わせる"):
             st.session_state.current_stack = float(st.session_state.initial_stack)
             st.rerun()
+
+    with btn_cols[2]:
+        st.caption(
+            f"Pot履歴：Pre {st.session_state.pot_history.get('pre', 0.0)} / "
+            f"1st {st.session_state.pot_history.get('1st', 0.0)} / "
+            f"2nd {st.session_state.pot_history.get('2nd', 0.0)} / "
+            f"3rd {st.session_state.pot_history.get('3rd', 0.0)}"
+        )
 
 
 # =========================
@@ -2008,28 +2005,33 @@ with setting_cols[2]:
         st.rerun()
 
 
-with st.expander("プレイヤー設定", expanded=False):
-    for p in st.session_state.players:
-        cols = st.columns([1, 2, 2])
+# =========================
+# プレイヤー設定 常時表示
+# =========================
 
-        with cols[0]:
-            st.write(p["id"])
+st.subheader("プレイヤー設定")
 
-        with cols[1]:
-            new_pos = st.selectbox(
-                f'{p["id"]} position',
-                POSITIONS,
-                index=POSITIONS.index(p["position"]) if p["position"] in POSITIONS else 0,
-                key=f'player_pos_{p["id"]}',
-            )
-            p["position"] = new_pos
+for p in st.session_state.players:
+    cols = st.columns([1, 2, 2], gap="small")
 
-        with cols[2]:
-            p["active"] = st.checkbox(
-                f'{p["id"]} active',
-                value=p.get("active", True),
-                key=f'player_active_{p["id"]}',
-            )
+    with cols[0]:
+        st.write(p["id"])
+
+    with cols[1]:
+        new_pos = st.selectbox(
+            f'{p["id"]} position',
+            POSITIONS,
+            index=POSITIONS.index(p["position"]) if p["position"] in POSITIONS else 0,
+            key=f'player_pos_{p["id"]}',
+        )
+        p["position"] = new_pos
+
+    with cols[2]:
+        p["active"] = st.checkbox(
+            f'{p["id"]} active',
+            value=p.get("active", True),
+            key=f'player_active_{p["id"]}',
+        )
 
 
 new_pos_signature = players_position_signature()
@@ -2044,12 +2046,12 @@ if new_pos_signature != st.session_state.players_position_signature:
 # ストリート別ログ
 # =========================
 
-st.markdown("#### ストリート別ログ")
-st.dataframe(
-    build_street_summary_df(),
-    hide_index=True,
-    use_container_width=True,
-)
+with st.expander("ストリート別ログ", expanded=False):
+    st.dataframe(
+        build_street_summary_df(),
+        hide_index=True,
+        use_container_width=True,
+    )
 
 
 # =========================
@@ -2059,8 +2061,11 @@ st.dataframe(
 st.divider()
 st.subheader("進行入力")
 
+# 1. ブラインド・スタック
 render_pot_panel()
-render_stack_panel()
+
+# 2. アクション入力
+st.markdown("### アクション入力")
 
 selected_step = st.selectbox(
     "現在の段階",
