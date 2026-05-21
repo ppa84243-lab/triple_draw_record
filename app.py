@@ -1774,29 +1774,9 @@ if new_pos_signature != st.session_state.players_position_signature:
 # トップ早見表
 # =========================
 
-st.markdown(
-    f"""
-    <div class="top-summary-box">
-        <div class="top-summary-title">このハンドの早見表</div>
-        <div class="top-summary-sub">
-            現在の段階：{FLOW_LABELS[st.session_state.current_step]}。
-            Heroのポジションは「プレイヤー設定」のH positionで管理します。
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
 st.markdown("#### ストリート別ログ")
 st.dataframe(
     build_street_summary_df(),
-    hide_index=True,
-    use_container_width=True,
-)
-
-st.markdown("#### プレイヤー別チェンジ")
-st.dataframe(
-    build_player_summary_df(),
     hide_index=True,
     use_container_width=True,
 )
