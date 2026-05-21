@@ -2242,7 +2242,53 @@ df = load_data()
 if df.empty:
     st.info("まだ保存済みハンドはありません。")
 else:
-    st.dataframe(df, use_container_width=True)
+    # 表示用に行番号を追加
+    display_df = df.copy()
+    display_df.insert(0, "削除用No", range(len(display_df)))
+
+    st.dataframe(display_df, use_container_width=True)
+
+    st.markdown("### 保存済みハンド操作")
+
+    delete_cols = st.columns([2, 2, 2], gap="small")
+
+    with delete_cols[0]:
+        selected_delete_no = st.selectbox(
+            "削除するハンドを選択",
+            display_df["削除用No"].tolist(),
+            format_func=lambda x: (
+                f"No.{x} / "
+                f"{display_df.loc[x, 'date'] if 'date' in display_df.columns else ''} / "
+                f"{display_df.loc[x, 'game_type'] if 'game_type' in display_df.columns else ''} / "
+                f"{display_df.loc[x, 'hero_position'] if 'hero_position' in display_df.columns else ''} / "
+                f"{display_df.loc[x, 'hero_predraw_hand'] if 'hero_predraw_hand' in display_df.columns else ''}"
+            ),
+            key="delete_hand_select",
+        )
+
+    with delete_cols[1]:
+        if st.button("選択した1件を削除", key="delete_one_hand"):
+            df = df.drop(index=int(selected_delete_no)).reset_index(drop=True)
+            df.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
+            st.success("選択したハンドを削除しました。")
+            st.rerun()
+
+    with delete_cols[2]:
+        confirm_delete_all = st.checkbox(
+            "全削除を有効化",
+            key="confirm_delete_all_hands",
+        )
+
+        if st.button(
+            "保存済みハンドを全リセット",
+            key="delete_all_hands",
+            disabled=not confirm_delete_all,
+        ):
+            if os.path.exists(CSV_FILE):
+                os.remove(CSV_FILE)
+
+            st.success("保存済みハンドをすべて削除しました。")
+            st.rerun()
 
     csv = df.to_csv(index=False).encode("utf-8-sig")
 
