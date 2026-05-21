@@ -157,6 +157,41 @@ TAG_OPTIONS = [
     "相手passive",
 ]
 
+BLIND_STRUCTURES = {
+    "Spadie": {
+        1: {"sb": 200, "bb": 400},
+        2: {"sb": 300, "bb": 500},
+        3: {"sb": 300, "bb": 600},
+        4: {"sb": 400, "bb": 800},
+        5: {"sb": 500, "bb": 1000},
+        6: {"sb": 600, "bb": 1200},
+        7: {"sb": 800, "bb": 1500},
+        8: {"sb": 1000, "bb": 2000},
+        9: {"sb": 1500, "bb": 3000},
+        10: {"sb": 2000, "bb": 4000},
+        11: {"sb": 2500, "bb": 5000},
+        12: {"sb": 3000, "bb": 6000},
+        13: {"sb": 4000, "bb": 8000},
+        14: {"sb": 5000, "bb": 10000},
+        15: {"sb": 6000, "bb": 12000},
+        16: {"sb": 8000, "bb": 15000},
+        17: {"sb": 10000, "bb": 20000},
+        18: {"sb": 15000, "bb": 30000},
+        19: {"sb": 20000, "bb": 40000},
+        20: {"sb": 25000, "bb": 50000},
+        21: {"sb": 30000, "bb": 60000},
+        22: {"sb": 40000, "bb": 80000},
+        23: {"sb": 50000, "bb": 100000},
+        24: {"sb": 60000, "bb": 120000},
+        25: {"sb": 75000, "bb": 150000},
+        26: {"sb": 100000, "bb": 200000},
+        27: {"sb": 150000, "bb": 300000},
+        28: {"sb": 200000, "bb": 400000},
+        29: {"sb": 250000, "bb": 500000},
+    },
+    "手動": {}
+}
+
 
 # =========================
 # セッション初期化
@@ -253,11 +288,17 @@ def init_state():
     if "folded_player_ids" not in st.session_state:
         st.session_state.folded_player_ids = set()
 
+    if "blind_structure_name" not in st.session_state:
+        st.session_state.blind_structure_name = "Spadie"
+
+    if "blind_level" not in st.session_state:
+        st.session_state.blind_level = 1
+
     if "small_blind" not in st.session_state:
-        st.session_state.small_blind = 50.0
+        st.session_state.small_blind = 200.0
 
     if "big_blind" not in st.session_state:
-        st.session_state.big_blind = 100.0
+        st.session_state.big_blind = 400.0
 
     if "pot_size" not in st.session_state:
         st.session_state.pot_size = 0.0
@@ -283,6 +324,12 @@ def init_state():
 
     if "blinds_posted" not in st.session_state:
         st.session_state.blinds_posted = False
+
+    if "initial_stack" not in st.session_state:
+        st.session_state.initial_stack = 0.0
+
+    if "current_stack" not in st.session_state:
+        st.session_state.current_stack = 0.0
 
 
 init_state()
@@ -1002,8 +1049,38 @@ def active_count():
 
 
 # =========================
-# Pot処理
+# Pot / Blind / Stack処理
 # =========================
+
+def apply_blind_structure_level():
+    structure_name = st.session_state.get("blind_structure_name", "手動")
+
+    if structure_name == "手動":
+        return
+
+    structure = BLIND_STRUCTURES.get(structure_name, {})
+    level = int(st.session_state.get("blind_level", 1))
+
+    if level not in structure:
+        return
+
+    st.session_state.small_blind = float(structure[level]["sb"])
+    st.session_state.big_blind = float(structure[level]["bb"])
+
+
+def get_max_blind_level():
+    structure_name = st.session_state.get("blind_structure_name", "手動")
+
+    if structure_name == "手動":
+        return 99
+
+    structure = BLIND_STRUCTURES.get(structure_name, {})
+
+    if not structure:
+        return 99
+
+    return max(structure.keys())
+
 
 def get_bet_unit(street):
     bb = float(st.session_state.big_blind)
@@ -1016,10 +1093,9 @@ def get_bet_unit(street):
 
 def setup_preflop_pending_after_blinds():
     state = st.session_state.action_state["pre"]
-
     active_ids = get_ordered_ids("pre")
 
-    # BBにもチェック/レイズの選択権を残すため、pendingには全員入れる
+    # BBにもチェック/レイズの選択権を残すため、全員をpendingに入れる
     state["pending"] = active_ids
 
     if state["pending"]:
@@ -1112,7 +1188,41 @@ def save_pot_snapshot(street):
 
 
 def render_pot_panel():
-    st.markdown("### ポット・収支")
+    st.markdown("### ポット・ブラインド")
+
+    structure_cols = st.columns([2, 1, 1, 1], gap="small")
+
+    with structure_cols[0]:
+        st.selectbox(
+            "ブラインド構造",
+            list(BLIND_STRUCTURES.keys()),
+            key="blind_structure_name",
+        )
+
+    max_level = get_max_blind_level()
+
+    with structure_cols[1]:
+        st.number_input(
+            "Level",
+            min_value=1,
+            max_value=max_level,
+            step=1,
+            key="blind_level",
+        )
+
+    with structure_cols[2]:
+        if st.button("前のLevel"):
+            st.session_state.blind_level = max(1, int(st.session_state.blind_level) - 1)
+            apply_blind_structure_level()
+            st.rerun()
+
+    with structure_cols[3]:
+        if st.button("次のLevel"):
+            st.session_state.blind_level = min(max_level, int(st.session_state.blind_level) + 1)
+            apply_blind_structure_level()
+            st.rerun()
+
+    apply_blind_structure_level()
 
     pot_cols = st.columns(5, gap="small")
 
@@ -1120,8 +1230,9 @@ def render_pot_panel():
         st.number_input(
             "SB",
             min_value=0.0,
-            step=50.0,
+            step=100.0,
             key="small_blind",
+            disabled=st.session_state.blind_structure_name != "手動",
         )
 
     with pot_cols[1]:
@@ -1130,6 +1241,7 @@ def render_pot_panel():
             min_value=0.0,
             step=100.0,
             key="big_blind",
+            disabled=st.session_state.blind_structure_name != "手動",
         )
 
     with pot_cols[2]:
@@ -1162,6 +1274,35 @@ def render_pot_panel():
         f"2nd: {st.session_state.pot_history.get('2nd', 0.0)} / "
         f"3rd: {st.session_state.pot_history.get('3rd', 0.0)}"
     )
+
+
+def render_stack_panel():
+    st.markdown("### スタック")
+
+    stack_cols = st.columns(4, gap="small")
+
+    with stack_cols[0]:
+        st.number_input(
+            "初期スタック",
+            min_value=0.0,
+            step=100.0,
+            key="initial_stack",
+        )
+
+    with stack_cols[1]:
+        st.metric("現在スタック", st.session_state.get("current_stack", 0.0))
+
+    with stack_cols[2]:
+        stack_diff = (
+            float(st.session_state.get("current_stack", 0.0))
+            - float(st.session_state.get("initial_stack", 0.0))
+        )
+        st.metric("スタック差分", stack_diff)
+
+    with stack_cols[3]:
+        if st.button("現在スタックを初期スタックに合わせる"):
+            st.session_state.current_stack = float(st.session_state.initial_stack)
+            st.rerun()
 
 
 # =========================
@@ -1506,6 +1647,8 @@ def build_simple_saved_df(df):
         "hand_no",
         "date",
         "game_type",
+        "blind_structure_name",
+        "blind_level",
         "hero_position",
         "hero_predraw_hand",
         "hero_pre_action",
@@ -1513,6 +1656,9 @@ def build_simple_saved_df(df):
         "hero_invested",
         "hero_return",
         "profit",
+        "stack_before",
+        "stack_after",
+        "stack_diff",
         "result",
     ]
 
@@ -1914,6 +2060,7 @@ st.divider()
 st.subheader("進行入力")
 
 render_pot_panel()
+render_stack_panel()
 
 selected_step = st.selectbox(
     "現在の段階",
@@ -2251,13 +2398,13 @@ with b1:
     played_date = st.date_input("日付", value=date.today())
 
 with b2:
-    tournament_name = st.text_input("大会名", placeholder="例：27TD & Badugi Mix")
+    tournament_name = st.text_input("大会名", placeholder="例：Spadie")
 
 with b3:
     result = st.selectbox("結果", RESULT_OPTIONS)
 
 with b4:
-    hero_return = st.number_input("回収額", value=0.0, step=1.0)
+    hero_return = st.number_input("回収額", value=0.0, step=100.0)
 
 with b5:
     hero_invested_now = float(st.session_state.get("hero_invested", 0.0))
@@ -2292,8 +2439,17 @@ hero_return_preview = float(hero_return)
 profit_preview = hero_return_preview - hero_invested_preview
 participation_preview = classify_participation(hero_position_preview, hero_pre_action_preview)
 
+stack_before_preview = float(st.session_state.get("current_stack", 0.0))
+stack_after_preview = stack_before_preview + profit_preview
+initial_stack_preview = float(st.session_state.get("initial_stack", 0.0))
+stack_diff_preview = stack_after_preview - initial_stack_preview
+
 confirm_df = pd.DataFrame([{
     "Game": st.session_state.game_type,
+    "Blind": st.session_state.blind_structure_name,
+    "Level": st.session_state.blind_level,
+    "SB": st.session_state.small_blind,
+    "BB": st.session_state.big_blind,
     "Position": hero_position_preview,
     "Hand": cards_to_text(st.session_state.hero_cards["predraw_hand"]),
     "Pre Action": hero_pre_action_preview if hero_pre_action_preview else "—",
@@ -2301,6 +2457,9 @@ confirm_df = pd.DataFrame([{
     "Hero投入": hero_invested_preview,
     "回収": hero_return_preview,
     "収支": profit_preview,
+    "保存前スタック": stack_before_preview,
+    "保存後スタック": stack_after_preview,
+    "初期比": stack_diff_preview,
 }])
 
 st.dataframe(confirm_df, hide_index=True, use_container_width=True)
@@ -2327,6 +2486,10 @@ if st.button("保存して次のハンドへ", type="primary"):
 
         hero_invested = float(st.session_state.get("hero_invested", 0.0))
         hand_profit = float(hero_return) - hero_invested
+
+        stack_before = float(st.session_state.get("current_stack", 0.0))
+        stack_after = stack_before + hand_profit
+        stack_diff = stack_after - float(st.session_state.get("initial_stack", 0.0))
 
         hand_no = get_next_hand_no()
 
@@ -2360,15 +2523,24 @@ if st.button("保存して次のハンドへ", type="primary"):
             "tournament": tournament_name,
             "game_type": st.session_state.game_type,
 
+            "blind_structure_name": st.session_state.blind_structure_name,
+            "blind_level": st.session_state.blind_level,
+            "small_blind": st.session_state.small_blind,
+            "big_blind": st.session_state.big_blind,
+
             "hero_position": hero_position,
             "opponent_count": st.session_state.opponent_count,
 
-            "small_blind": st.session_state.small_blind,
-            "big_blind": st.session_state.big_blind,
             "pot_current": st.session_state.pot_size,
             "hero_invested": hero_invested,
             "hero_return": hero_return,
             "profit": hand_profit,
+
+            "initial_stack": st.session_state.initial_stack,
+            "stack_before": stack_before,
+            "stack_after": stack_after,
+            "stack_diff": stack_diff,
+
             "pot_pre": st.session_state.pot_history.get("pre", 0.0),
             "pot_1st": st.session_state.pot_history.get("1st", 0.0),
             "pot_2nd": st.session_state.pot_history.get("2nd", 0.0),
@@ -2419,6 +2591,9 @@ if st.button("保存して次のハンドへ", type="primary"):
                 row[f"{pid}_3rd_change"] = hero_change_from_cards("3rd")
 
         save_data(row)
+
+        st.session_state.current_stack = max(0.0, stack_after)
+
         st.success("保存しました。")
         reset_hand_all()
         st.rerun()
@@ -2537,3 +2712,11 @@ else:
     if "participation_type" in df.columns:
         st.write("参加分類")
         st.bar_chart(df["participation_type"].value_counts())
+
+    if "stack_after" in df.columns:
+        st.write("スタック推移")
+        stack_chart_df = df[["hand_no", "stack_after"]].copy()
+        stack_chart_df["hand_no"] = pd.to_numeric(stack_chart_df["hand_no"], errors="coerce")
+        stack_chart_df["stack_after"] = pd.to_numeric(stack_chart_df["stack_after"], errors="coerce")
+        stack_chart_df = stack_chart_df.dropna().set_index("hand_no")
+        st.line_chart(stack_chart_df)
