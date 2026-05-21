@@ -24,10 +24,10 @@ SUITS = [
     {"symbol": "♦", "name": "diamond"},
 ]
 
-POSITIONS = ["UTG", "HJ", "CO", "BTN", "SB", "BB"]
+POSITIONS = ["UTG", "UTG+1", "HJ", "CO", "BTN", "SB", "BB"]
 
-PREDRAW_ORDER = ["UTG", "HJ", "CO", "BTN", "SB", "BB"]
-POSTDRAW_ORDER = ["SB", "BB", "UTG", "HJ", "CO", "BTN"]
+PREDRAW_ORDER = ["UTG", "UTG+1", "HJ", "CO", "BTN", "SB", "BB"]
+POSTDRAW_ORDER = ["SB", "BB", "UTG", "UTG+1", "HJ", "CO", "BTN"]
 
 BET_STREETS = ["pre", "1st", "2nd", "3rd"]
 
