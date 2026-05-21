@@ -24,6 +24,7 @@ SUITS = [
     {"symbol": "♦", "name": "diamond"},
 ]
 
+# 7max
 POSITIONS = ["UTG", "UTG+1", "HJ", "CO", "BTN", "SB", "BB"]
 
 PREDRAW_ORDER = ["UTG", "UTG+1", "HJ", "CO", "BTN", "SB", "BB"]
@@ -115,6 +116,7 @@ CHANGE_OPTIONS_BADUGI = ["不明", "pat", "1c", "2c", "3c", "4c"]
 
 PREDRAW_ACTIONS_NO_RAISE = ["fold", "check", "call", "raise"]
 PREDRAW_ACTIONS_FACING_RAISE = ["call", "raise", "fold"]
+PREDRAW_ACTIONS_BB_OPTION = ["fold", "check", "raise"]
 
 POSTDRAW_ACTIONS_NO_BET = ["check", "bet"]
 POSTDRAW_ACTIONS_FACING_BET = ["call", "raise", "fold"]
@@ -122,14 +124,37 @@ POSTDRAW_ACTIONS_FACING_BET = ["call", "raise", "fold"]
 RESULT_OPTIONS = ["win", "lose", "split", "fold", "unknown"]
 
 TAG_OPTIONS = [
-    "pat", "1c", "2c", "3c",
-    "9ロー判断", "8ロー判断",
-    "rough badugi", "smooth badugi",
-    "tri", "bluff", "snow",
-    "bluff catch", "thin value",
-    "mistake候補", "マルチウェイ",
-    "相手pat", "相手1c", "相手2c",
-    "相手aggressive", "相手passive",
+    "即fold",
+    "dealt_only",
+    "folded",
+    "blind_fold",
+    "blind_unacted",
+    "played",
+    "VPIP",
+    "PFR",
+    "BB defend",
+    "SB complete",
+    "3bet",
+    "pat",
+    "1c",
+    "2c",
+    "3c",
+    "9ロー判断",
+    "8ロー判断",
+    "rough badugi",
+    "smooth badugi",
+    "tri",
+    "bluff",
+    "snow",
+    "bluff catch",
+    "thin value",
+    "mistake候補",
+    "マルチウェイ",
+    "相手pat",
+    "相手1c",
+    "相手2c",
+    "相手aggressive",
+    "相手passive",
 ]
 
 
@@ -994,13 +1019,8 @@ def setup_preflop_pending_after_blinds():
 
     active_ids = get_ordered_ids("pre")
 
-    bb_player = get_player_by_position("BB")
-    bb_id = bb_player["id"] if bb_player else None
-
-    if bb_id:
-        state["pending"] = [pid for pid in active_ids if pid != bb_id]
-    else:
-        state["pending"] = active_ids
+    # BBにもチェック/レイズの選択権を残すため、pendingには全員入れる
+    state["pending"] = active_ids
 
     if state["pending"]:
         state["current_actor_id"] = state["pending"][0]
@@ -1248,6 +1268,15 @@ def get_available_actions(street):
 
     if street == "pre":
         if state["has_bet"]:
+            actor = current_actor(street)
+
+            if actor:
+                player_paid = get_player_street_contrib(street, actor["id"])
+                current_bet = float(state.get("current_bet", 0.0))
+
+                if player_paid >= current_bet:
+                    return PREDRAW_ACTIONS_BB_OPTION
+
             return PREDRAW_ACTIONS_FACING_RAISE
 
         return PREDRAW_ACTIONS_NO_RAISE
@@ -1337,7 +1366,7 @@ def force_prev_step():
 
 
 # =========================
-# Change / 表示処理
+# Change / 表示 / 集計処理
 # =========================
 
 def get_change_options():
@@ -1352,24 +1381,6 @@ def player_change_for_street(player_id, street):
         return hero_change_from_cards(street)
 
     return st.session_state.changes.get(street, {}).get(player_id, "不明")
-
-
-def build_player_summary_df():
-    rows = []
-
-    for p in sort_players_by_order(st.session_state.players, "pre"):
-        pid = p["id"]
-
-        rows.append({
-            "対象": "Hero" if pid == "H" else pid,
-            "位置": p["position"],
-            "状態": "active" if p.get("active", True) else "fold",
-            "1st change": player_change_for_street(pid, "1st"),
-            "2nd change": player_change_for_street(pid, "2nd"),
-            "3rd change": player_change_for_street(pid, "3rd"),
-        })
-
-    return pd.DataFrame(rows)
 
 
 def build_street_summary_df():
@@ -1399,10 +1410,6 @@ def build_street_summary_df():
     return pd.DataFrame(rows)
 
 
-# =========================
-# CSV処理
-# =========================
-
 def load_data():
     if os.path.exists(CSV_FILE):
         return pd.read_csv(CSV_FILE)
@@ -1421,6 +1428,123 @@ def save_data(row):
 
     df.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
     return df
+
+
+def get_next_hand_no():
+    df = load_data()
+
+    if df.empty:
+        return 1
+
+    if "hand_no" not in df.columns:
+        return len(df) + 1
+
+    nums = pd.to_numeric(df["hand_no"], errors="coerce").dropna()
+
+    if nums.empty:
+        return len(df) + 1
+
+    return int(nums.max()) + 1
+
+
+def get_hero_pre_action():
+    for entry in st.session_state.logs.get("pre", []):
+        if entry.get("player_id") == "H":
+            return entry.get("action", "")
+
+    return ""
+
+
+def hero_faced_raise_pre():
+    for entry in st.session_state.logs.get("pre", []):
+        if entry.get("player_id") == "H":
+            return False
+
+        if entry.get("action") == "raise":
+            return True
+
+    return False
+
+
+def is_hero_vpip(hero_pre_action):
+    return hero_pre_action in ["call", "raise"]
+
+
+def is_hero_pfr(hero_pre_action):
+    return hero_pre_action == "raise"
+
+
+def is_hero_bb_defend(hero_position, hero_pre_action):
+    return (
+        hero_position == "BB"
+        and hero_faced_raise_pre()
+        and hero_pre_action in ["call", "raise"]
+    )
+
+
+def classify_participation(hero_position, hero_pre_action):
+    hero_invested = float(st.session_state.get("hero_invested", 0.0))
+
+    if hero_pre_action == "":
+        if hero_invested > 0:
+            return "blind_unacted"
+        return "dealt_only"
+
+    if hero_pre_action == "fold":
+        if hero_position in ["SB", "BB"] and hero_invested > 0:
+            return "blind_fold"
+        return "folded"
+
+    if hero_pre_action in ["call", "raise", "bet", "check"]:
+        return "played"
+
+    return "unknown"
+
+
+def build_simple_saved_df(df):
+    cols = [
+        "hand_no",
+        "date",
+        "game_type",
+        "hero_position",
+        "hero_predraw_hand",
+        "hero_pre_action",
+        "participation_type",
+        "hero_invested",
+        "hero_return",
+        "profit",
+        "result",
+    ]
+
+    existing_cols = [c for c in cols if c in df.columns]
+
+    if not existing_cols:
+        return df
+
+    return df[existing_cols].copy()
+
+
+def build_stats_from_df(df):
+    if df.empty:
+        return {}
+
+    total_hands = len(df)
+
+    vpip = int(pd.to_numeric(df["is_vpip"], errors="coerce").fillna(0).sum()) if "is_vpip" in df.columns else 0
+    pfr = int(pd.to_numeric(df["is_pfr"], errors="coerce").fillna(0).sum()) if "is_pfr" in df.columns else 0
+    bb_defend = int(pd.to_numeric(df["is_bb_defend"], errors="coerce").fillna(0).sum()) if "is_bb_defend" in df.columns else 0
+
+    total_profit = float(pd.to_numeric(df["profit"], errors="coerce").fillna(0).sum()) if "profit" in df.columns else 0.0
+
+    return {
+        "総ハンド数": total_hands,
+        "VPIP回数": vpip,
+        "VPIP率": round(vpip / total_hands * 100, 1) if total_hands else 0,
+        "PFR回数": pfr,
+        "PFR率": round(pfr / total_hands * 100, 1) if total_hands else 0,
+        "BB defend回数": bb_defend,
+        "合計収支": total_profit,
+    }
 
 
 # =========================
@@ -1447,6 +1571,17 @@ st.markdown(
 
     div[data-testid="stHorizontalBlock"] {
         gap: 0rem !important;
+    }
+
+    .game-badge {
+        padding: 10px 14px;
+        border-radius: 12px;
+        background: #111827;
+        color: white;
+        font-size: 26px;
+        font-weight: 900;
+        text-align: center;
+        margin-bottom: 12px;
     }
 
     div[data-testid="stHorizontalBlock"]:has(div[class*="st-key-cardbtn_"]) {
@@ -1534,26 +1669,6 @@ st.markdown(
         padding: 0 !important;
         margin: 0 !important;
         box-shadow: none !important;
-    }
-
-    .top-summary-box {
-        padding: 12px 16px;
-        border-radius: 14px;
-        border: 2px solid #222222;
-        background: #fffdf5;
-        margin-bottom: 16px;
-    }
-
-    .top-summary-title {
-        font-size: 20px;
-        font-weight: 800;
-        margin-bottom: 4px;
-    }
-
-    .top-summary-sub {
-        font-size: 14px;
-        color: #555555;
-        margin-bottom: 8px;
     }
 
     .actor-box {
@@ -1702,6 +1817,15 @@ st.markdown(
 
 st.title("27TD & Badugi Hand History Tracker")
 
+st.markdown(
+    f"""
+    <div class="game-badge">
+        現在ゲーム：{st.session_state.game_type}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # =========================
 # 基本設定
@@ -1771,7 +1895,7 @@ if new_pos_signature != st.session_state.players_position_signature:
 
 
 # =========================
-# トップ早見表
+# ストリート別ログ
 # =========================
 
 st.markdown("#### ストリート別ログ")
@@ -1964,7 +2088,7 @@ elif current_step in STEP_TO_BET_STREET:
                         st.rerun()
 
             if state["has_bet"]:
-                st.caption("bet/raiseに直面中：call / raise / fold")
+                st.caption("bet/raiseに直面中、またはBB option：call/check / raise / fold")
             else:
                 if street == "pre":
                     st.caption("まだraiseなし：fold / check / call / raise")
@@ -2021,6 +2145,16 @@ with move_ops[0]:
 with move_ops[1]:
     if st.button("次の段階へ"):
         force_next_step()
+        st.rerun()
+
+
+st.divider()
+
+discard_cols = st.columns([1, 1], gap=None)
+
+with discard_cols[0]:
+    if st.button("このハンドを保存せず破棄して次へ", key="discard_current_hand"):
+        reset_hand_all()
         st.rerun()
 
 
@@ -2144,12 +2278,41 @@ note = st.text_area(
 
 
 # =========================
+# 保存前確認
+# =========================
+
+st.divider()
+st.subheader("保存前確認")
+
+hero_player_preview = get_player_by_id("H")
+hero_position_preview = hero_player_preview["position"] if hero_player_preview else "不明"
+hero_pre_action_preview = get_hero_pre_action()
+hero_invested_preview = float(st.session_state.get("hero_invested", 0.0))
+hero_return_preview = float(hero_return)
+profit_preview = hero_return_preview - hero_invested_preview
+participation_preview = classify_participation(hero_position_preview, hero_pre_action_preview)
+
+confirm_df = pd.DataFrame([{
+    "Game": st.session_state.game_type,
+    "Position": hero_position_preview,
+    "Hand": cards_to_text(st.session_state.hero_cards["predraw_hand"]),
+    "Pre Action": hero_pre_action_preview if hero_pre_action_preview else "—",
+    "Participation": participation_preview,
+    "Hero投入": hero_invested_preview,
+    "回収": hero_return_preview,
+    "収支": profit_preview,
+}])
+
+st.dataframe(confirm_df, hide_index=True, use_container_width=True)
+
+
+# =========================
 # 保存
 # =========================
 
 st.divider()
 
-if st.button("保存", type="primary"):
+if st.button("保存して次のハンドへ", type="primary"):
     max_cards = MAX_HAND_SIZE[st.session_state.game_type]
 
     if len(st.session_state.hero_cards["predraw_hand"]) != max_cards:
@@ -2165,7 +2328,33 @@ if st.button("保存", type="primary"):
         hero_invested = float(st.session_state.get("hero_invested", 0.0))
         hand_profit = float(hero_return) - hero_invested
 
+        hand_no = get_next_hand_no()
+
+        hero_pre_action = get_hero_pre_action()
+        participation_type = classify_participation(hero_position, hero_pre_action)
+
+        is_vpip = is_hero_vpip(hero_pre_action)
+        is_pfr = is_hero_pfr(hero_pre_action)
+        is_bb_defend = is_hero_bb_defend(hero_position, hero_pre_action)
+
+        auto_tags = []
+
+        if participation_type not in ["unknown", ""]:
+            auto_tags.append(participation_type)
+
+        if is_vpip:
+            auto_tags.append("VPIP")
+
+        if is_pfr:
+            auto_tags.append("PFR")
+
+        if is_bb_defend:
+            auto_tags.append("BB defend")
+
+        final_tags = sorted(set(tags + auto_tags))
+
         row = {
+            "hand_no": hand_no,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "date": played_date,
             "tournament": tournament_name,
@@ -2186,6 +2375,11 @@ if st.button("保存", type="primary"):
             "pot_3rd": st.session_state.pot_history.get("3rd", 0.0),
 
             "hero_predraw_hand": cards_to_text(st.session_state.hero_cards["predraw_hand"]),
+            "hero_pre_action": hero_pre_action,
+            "participation_type": participation_type,
+            "is_vpip": is_vpip,
+            "is_pfr": is_pfr,
+            "is_bb_defend": is_bb_defend,
 
             "hero_d1_discard": cards_to_text(st.session_state.hero_cards["d1_discard"]),
             "hero_d1_draw": cards_to_text(st.session_state.hero_cards["d1_draw"]),
@@ -2206,7 +2400,7 @@ if st.button("保存", type="primary"):
 
             "result": result,
             "mistake_level": mistake_level,
-            "tags": ",".join(tags),
+            "tags": ",".join(final_tags),
             "note": note,
         }
 
@@ -2242,26 +2436,28 @@ df = load_data()
 if df.empty:
     st.info("まだ保存済みハンドはありません。")
 else:
-    # 表示用に行番号を追加
-    display_df = df.copy()
-    display_df.insert(0, "削除用No", range(len(display_df)))
+    st.markdown("### 簡易一覧")
 
-    st.dataframe(display_df, use_container_width=True)
+    simple_df = build_simple_saved_df(df)
+    display_simple_df = simple_df.copy()
+    display_simple_df.insert(0, "削除用No", range(len(display_simple_df)))
+
+    st.dataframe(display_simple_df, use_container_width=True)
 
     st.markdown("### 保存済みハンド操作")
 
-    delete_cols = st.columns([2, 2, 2], gap="small")
+    delete_cols = st.columns([2, 2, 2], gap=None)
 
     with delete_cols[0]:
         selected_delete_no = st.selectbox(
-            "削除するハンドを選択",
-            display_df["削除用No"].tolist(),
+            "削除するハンド",
+            display_simple_df["削除用No"].tolist(),
             format_func=lambda x: (
                 f"No.{x} / "
-                f"{display_df.loc[x, 'date'] if 'date' in display_df.columns else ''} / "
-                f"{display_df.loc[x, 'game_type'] if 'game_type' in display_df.columns else ''} / "
-                f"{display_df.loc[x, 'hero_position'] if 'hero_position' in display_df.columns else ''} / "
-                f"{display_df.loc[x, 'hero_predraw_hand'] if 'hero_predraw_hand' in display_df.columns else ''}"
+                f"Hand {display_simple_df.loc[x, 'hand_no'] if 'hand_no' in display_simple_df.columns else x} / "
+                f"{display_simple_df.loc[x, 'game_type'] if 'game_type' in display_simple_df.columns else ''} / "
+                f"{display_simple_df.loc[x, 'hero_position'] if 'hero_position' in display_simple_df.columns else ''} / "
+                f"{display_simple_df.loc[x, 'hero_predraw_hand'] if 'hero_predraw_hand' in display_simple_df.columns else ''}"
             ),
             key="delete_hand_select",
         )
@@ -2299,20 +2495,36 @@ else:
         mime="text/csv",
     )
 
+    st.markdown("### 全列表示")
+
+    with st.expander("保存済みハンドの全列を見る", expanded=False):
+        st.dataframe(df, use_container_width=True)
+
     st.subheader("簡易集計")
 
-    m1, m2, m3 = st.columns(3)
+    stats = build_stats_from_df(df)
 
-    with m1:
-        st.metric("記録ハンド数", len(df))
+    s1, s2, s3, s4 = st.columns(4)
 
-    with m2:
-        if "profit" in df.columns:
-            st.metric("合計収支", df["profit"].sum())
+    with s1:
+        st.metric("総ハンド数", stats.get("総ハンド数", 0))
 
-    with m3:
-        if "result" in df.columns:
-            st.metric("勝利数", (df["result"] == "win").sum())
+    with s2:
+        st.metric("VPIP", f'{stats.get("VPIP率", 0)}%')
+
+    with s3:
+        st.metric("PFR", f'{stats.get("PFR率", 0)}%')
+
+    with s4:
+        st.metric("合計収支", stats.get("合計収支", 0.0))
+
+    s5, s6 = st.columns(2)
+
+    with s5:
+        st.metric("VPIP回数", stats.get("VPIP回数", 0))
+
+    with s6:
+        st.metric("BB defend回数", stats.get("BB defend回数", 0))
 
     if "game_type" in df.columns:
         st.write("ゲーム別ハンド数")
@@ -2321,3 +2533,7 @@ else:
     if "hero_position" in df.columns and "profit" in df.columns:
         st.write("Heroポジション別収支")
         st.bar_chart(df.groupby("hero_position")["profit"].sum())
+
+    if "participation_type" in df.columns:
+        st.write("参加分類")
+        st.bar_chart(df["participation_type"].value_counts())
