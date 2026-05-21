@@ -1723,7 +1723,7 @@ with setting_cols[1]:
     st.number_input(
         "相手人数",
         min_value=0,
-        max_value=7,
+        max_value=6,
         step=1,
         key="opponent_count",
     )
