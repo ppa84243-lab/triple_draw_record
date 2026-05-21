@@ -1095,7 +1095,6 @@ def setup_preflop_pending_after_blinds():
     state = st.session_state.action_state["pre"]
     active_ids = get_ordered_ids("pre")
 
-    # BBにもチェック/レイズの選択権を残すため、全員をpendingに入れる
     state["pending"] = active_ids
 
     if state["pending"]:
@@ -1126,6 +1125,24 @@ def add_player_street_contrib(street, player_id, amount):
         )
 
 
+def add_dead_blind_to_pot(street, label, amount):
+    """
+    記録対象プレイヤーとしては存在しないSB/BBをpotにだけ入れる。
+    Hero投入額には加算しない。
+    """
+    if street not in st.session_state.street_contrib:
+        st.session_state.street_contrib[street] = {}
+
+    amount = max(0.0, float(amount))
+    key = f"dead_{label}"
+
+    current = float(st.session_state.street_contrib[street].get(key, 0.0))
+    st.session_state.street_contrib[street][key] = current + amount
+
+    st.session_state.pot_size = round(float(st.session_state.pot_size) + amount, 2)
+    st.session_state.pot_history[street] = st.session_state.pot_size
+
+
 def post_blinds():
     reset_pot_state()
 
@@ -1137,12 +1154,16 @@ def post_blinds():
 
     if sb_player:
         add_player_street_contrib("pre", sb_player["id"], sb)
+    else:
+        add_dead_blind_to_pot("pre", "SB", sb)
 
     if bb_player:
         add_player_street_contrib("pre", bb_player["id"], bb)
+    else:
+        add_dead_blind_to_pot("pre", "BB", bb)
 
-        st.session_state.action_state["pre"]["has_bet"] = True
-        st.session_state.action_state["pre"]["current_bet"] = bb
+    st.session_state.action_state["pre"]["has_bet"] = True
+    st.session_state.action_state["pre"]["current_bet"] = bb
 
     st.session_state.pot_history["pre"] = st.session_state.pot_size
 
@@ -1488,6 +1509,51 @@ def clear_action_log(street):
 def reset_street_action(street):
     st.session_state.action_state[street] = fresh_action_state()[street]
     ensure_street_started(street)
+
+
+def fold_remaining_players(street):
+    """
+    現在のbetting streetで、アクション権利が残っているプレイヤーを全員foldにする。
+    Heroが残っている場合は勝手にfoldしない。
+    """
+    state = st.session_state.action_state[street]
+
+    if state["complete"]:
+        return
+
+    pending = list(state.get("pending", []))
+
+    if not state.get("has_bet", False):
+        active_ids = get_ordered_ids(street)
+        acted = list(state.get("acted", []))
+        pending = [pid for pid in active_ids if pid not in acted]
+
+    pending = [pid for pid in pending if pid != "H"]
+
+    if not pending:
+        st.toast("foldできる残りプレイヤーがいません")
+        return
+
+    for pid in pending:
+        player = get_player_by_id(pid)
+
+        if player is None:
+            continue
+
+        if not player.get("active", True):
+            continue
+
+        st.session_state.action_state[street]["current_actor_id"] = pid
+
+        apply_action(
+            street,
+            "fold",
+            record=True,
+            auto_move=True,
+        )
+
+        if st.session_state.current_step == "done":
+            break
 
 
 def force_next_step():
@@ -2061,10 +2127,8 @@ with st.expander("ストリート別ログ", expanded=False):
 st.divider()
 st.subheader("進行入力")
 
-# 1. ブラインド・スタック
 render_pot_panel()
 
-# 2. アクション入力
 st.markdown("### アクション入力")
 
 selected_step = st.selectbox(
@@ -2253,19 +2317,24 @@ elif current_step in STEP_TO_BET_STREET:
         done = " ✅" if st.session_state.action_state[s]["complete"] else ""
         st.write(f"**{STREET_LABELS[s]}{done}**：{street_log_text(s)}")
 
-    log_ops = st.columns(3)
+    log_ops = st.columns(4)
 
     with log_ops[0]:
+        if st.button("残り全員fold", key=f"fold_remaining_{street}"):
+            fold_remaining_players(street)
+            st.rerun()
+
+    with log_ops[1]:
         if st.button("1つ戻す"):
             undo_action_log(street)
             st.rerun()
 
-    with log_ops[1]:
+    with log_ops[2]:
         if st.button("このbettingクリア"):
             clear_action_log(street)
             st.rerun()
 
-    with log_ops[2]:
+    with log_ops[3]:
         if st.button("このbettingリセット"):
             clear_action_log(street)
             reset_street_action(street)
