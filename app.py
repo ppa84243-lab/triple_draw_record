@@ -197,27 +197,30 @@ BLIND_STRUCTURES = {
 # セッション初期化
 # =========================
 
-def build_players(hero_position, opponent_count):
-    players = [
-        {
-            "id": "H",
-            "name": "Hero",
-            "position": hero_position,
-            "active": True,
-        }
-    ]
+def build_players(hero_position="BB"):
+    """
+    7max固定で全席を作る。
+    相手人数は最初に決めず、プリドローでfoldしなかった相手だけをVillain扱いにする。
+    """
+    players = []
+    villain_no = 1
 
-    available_positions = [p for p in POSITIONS if p != hero_position]
-
-    for i in range(int(opponent_count)):
-        pos = available_positions[i % len(available_positions)] if available_positions else "UTG"
-
-        players.append({
-            "id": f"V{i + 1}",
-            "name": f"V{i + 1}",
-            "position": pos,
-            "active": True,
-        })
+    for pos in POSITIONS:
+        if pos == hero_position:
+            players.append({
+                "id": "H",
+                "name": "Hero",
+                "position": pos,
+                "active": True,
+            })
+        else:
+            players.append({
+                "id": f"V{villain_no}",
+                "name": f"V{villain_no}",
+                "position": pos,
+                "active": True,
+            })
+            villain_no += 1
 
     return players
 
@@ -248,11 +251,8 @@ def init_state():
     if "game_type" not in st.session_state:
         st.session_state.game_type = "27TD"
 
-    if "opponent_count" not in st.session_state:
-        st.session_state.opponent_count = 1
-
     if "players" not in st.session_state:
-        st.session_state.players = build_players("BB", st.session_state.opponent_count)
+        st.session_state.players = build_players("BB")
 
     if "hero_cards" not in st.session_state:
         st.session_state.hero_cards = {}
@@ -350,7 +350,6 @@ def suit_name_from_symbol(symbol):
         "♣": "club",
         "♦": "diamond",
     }.get(symbol, "unknown")
-
 
 def cards_to_text(cards):
     if not cards:
@@ -808,47 +807,6 @@ def get_player_by_position(position):
     return None
 
 
-def sync_players_to_opponent_count():
-    target_villain_count = int(st.session_state.opponent_count)
-
-    old_players = st.session_state.players if "players" in st.session_state else []
-    old_hero = next((p for p in old_players if p["id"] == "H"), None)
-
-    if old_hero is None:
-        old_hero = {
-            "id": "H",
-            "name": "Hero",
-            "position": "BB",
-            "active": True,
-        }
-
-    new_players = [old_hero]
-    old_villains = [p for p in old_players if p["id"] != "H"]
-
-    used_positions = {old_hero["position"]}
-    available_positions = [p for p in POSITIONS if p not in used_positions]
-
-    for i in range(target_villain_count):
-        villain_id = f"V{i + 1}"
-        old_v = next((p for p in old_villains if p["id"] == villain_id), None)
-
-        if old_v:
-            pos = old_v["position"]
-            active = old_v.get("active", True)
-        else:
-            pos = available_positions[i % len(available_positions)] if available_positions else "UTG"
-            active = True
-
-        new_players.append({
-            "id": villain_id,
-            "name": villain_id,
-            "position": pos,
-            "active": active,
-        })
-
-    st.session_state.players = new_players
-
-
 def players_position_signature():
     if "players" not in st.session_state:
         return ""
@@ -941,6 +899,20 @@ def get_active_players():
         if p.get("active", True) and p["id"] not in folded
     ]
 
+def get_remaining_villains():
+    """
+    現在残っているHero以外のプレイヤー。
+    プリドローでfoldしなかった相手がVillainになる。
+    """
+    return [
+        p for p in get_active_players()
+        if p["id"] != "H"
+    ]
+
+
+def get_remaining_villain_count():
+    return len(get_remaining_villains())
+
 
 def get_active_players_for_street(street):
     return sort_players_by_order(get_active_players(), street)
@@ -1001,6 +973,7 @@ def current_actor(street):
 
     return get_player_by_id(state["current_actor_id"])
 
+
 def get_current_action_player(street):
     """
     現在のstreetで、順番通りにアクションするプレイヤーを返す。
@@ -1026,21 +999,6 @@ def get_current_action_player(street):
         return None
 
     return player
-
-def get_selectable_action_players(street):
-    state = st.session_state.action_state[street]
-
-    if state["complete"]:
-        return []
-
-    active_players = get_active_players_for_street(street)
-
-    if state.get("has_bet", False):
-        pending_ids = list(state.get("pending", []))
-        return [p for p in active_players if p["id"] in pending_ids]
-
-    acted_ids = list(state.get("acted", []))
-    return [p for p in active_players if p["id"] not in acted_ids]
 
 
 def get_current_changer(street):
@@ -1136,12 +1094,16 @@ def setup_preflop_pending_after_blinds():
     state = st.session_state.action_state["pre"]
     active_ids = get_ordered_ids("pre")
 
-    state["pending"] = active_ids
+    state["has_bet"] = True
+    state["current_bet"] = float(st.session_state.big_blind)
+    state["acted"] = []
+    state["complete"] = False
 
-    if state["pending"]:
-        state["current_actor_id"] = state["pending"][0]
-    else:
-        state["current_actor_id"] = first_active_id("pre")
+    # プリドローはUTGから順番に開始
+    state["current_actor_id"] = active_ids[0] if active_ids else None
+
+    # BB額に対して全員が未対応という扱い
+    state["pending"] = active_ids
 
 
 def get_player_street_contrib(street, player_id):
@@ -1362,6 +1324,8 @@ def render_pot_panel():
             f"2nd {st.session_state.pot_history.get('2nd', 0.0)} / "
             f"3rd {st.session_state.pot_history.get('3rd', 0.0)}"
         )
+
+
 # =========================
 # Betting処理
 # =========================
@@ -1460,7 +1424,6 @@ def apply_action(street, action, record=True, auto_move=True):
 
     state["current_actor_id"] = get_next_id_after(street, actor_id, remaining)
 
-
 def get_available_actions(street):
     state = st.session_state.action_state[street]
 
@@ -1552,8 +1515,7 @@ def reset_street_action(street):
 
 def fold_remaining_players(street):
     """
-    現在のbetting streetで、アクション権利が残っているプレイヤーを全員foldにする。
-    Heroが残っている場合は勝手にfoldしない。
+    現在のbetting streetで、アクション権利が残っているHero以外を全員foldにする。
     """
     state = st.session_state.action_state[street]
 
@@ -1762,6 +1724,8 @@ def build_simple_saved_df(df):
         "stack_after",
         "stack_diff",
         "result",
+        "opponent_count",
+        "remaining_villains",
     ]
 
     existing_cols = [c for c in cols if c in df.columns]
@@ -1848,14 +1812,6 @@ st.markdown(
         padding-right: 0rem !important;
     }
 
-    div[class*="st-key-cardbtn_"] {
-        width: 100% !important;
-    }
-
-    div[class*="st-key-cardbtn_"] div.stButton {
-        width: 100% !important;
-    }
-
     div[class*="st-key-cardbtn_"] div.stButton > button {
         width: 100% !important;
         min-width: 0 !important;
@@ -1888,20 +1844,6 @@ st.markdown(
         padding-right: 0rem !important;
         margin-left: 0rem !important;
         margin-right: 0rem !important;
-    }
-
-    div[class*="st-key-actionbtn_"],
-    div[class*="st-key-changebtn_"] {
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
-    div[class*="st-key-actionbtn_"] div.stButton,
-    div[class*="st-key-changebtn_"] div.stButton {
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
     }
 
     div[class*="st-key-actionbtn_"] div.stButton > button,
@@ -2081,7 +2023,7 @@ st.markdown(
 
 st.subheader("基本設定")
 
-setting_cols = st.columns(3)
+setting_cols = st.columns(2)
 
 with setting_cols[0]:
     st.radio(
@@ -2092,29 +2034,25 @@ with setting_cols[0]:
     )
 
 with setting_cols[1]:
-    st.number_input(
-        "相手人数",
-        min_value=0,
-        max_value=6,
-        step=1,
-        key="opponent_count",
+    hero_position_for_reset = st.selectbox(
+        "Hero初期ポジション",
+        POSITIONS,
+        index=POSITIONS.index("BB"),
+        key="hero_position_for_reset",
     )
 
-sync_players_to_opponent_count()
-
-with setting_cols[2]:
-    if st.button("プレイヤー再作成"):
-        sync_players_to_opponent_count()
+    if st.button("7maxプレイヤー再作成"):
+        st.session_state.players = build_players(hero_position_for_reset)
         reset_hand_all()
         st.session_state.players_position_signature = players_position_signature()
         st.rerun()
 
 
 # =========================
-# プレイヤー設定 常時表示
+# 7max座席設定
 # =========================
 
-st.subheader("プレイヤー設定")
+st.subheader("7max座席設定")
 
 for p in st.session_state.players:
     cols = st.columns([1, 2, 2], gap="small")
@@ -2123,28 +2061,11 @@ for p in st.session_state.players:
         st.write(p["id"])
 
     with cols[1]:
-        new_pos = st.selectbox(
-            f'{p["id"]} position',
-            POSITIONS,
-            index=POSITIONS.index(p["position"]) if p["position"] in POSITIONS else 0,
-            key=f'player_pos_{p["id"]}',
-        )
-        p["position"] = new_pos
+        st.write(p["position"])
 
     with cols[2]:
-        p["active"] = st.checkbox(
-            f'{p["id"]} active',
-            value=p.get("active", True),
-            key=f'player_active_{p["id"]}',
-        )
-
-
-new_pos_signature = players_position_signature()
-
-if new_pos_signature != st.session_state.players_position_signature:
-    st.session_state.players_position_signature = new_pos_signature
-    reset_order_state_only()
-    st.rerun()
+        status = "active" if p.get("active", True) else "fold"
+        st.write(status)
 
 
 # =========================
@@ -2199,7 +2120,7 @@ if current_step in STEP_TO_CHANGE_STREET:
         f"""
         <div class="change-box">
             <b>{STREET_LABELS[change_street]} change</b><br>
-            現在change権利があるプレイヤーだけ表示します。
+            プリドローでfoldしなかったプレイヤーだけが表示されます。
         </div>
         """,
         unsafe_allow_html=True,
@@ -2269,12 +2190,6 @@ if current_step in STEP_TO_CHANGE_STREET:
                 if st.button(f"{pid} changeを取り消す", key=f"clear_change_{change_street}_{pid}"):
                     st.session_state.changes[change_street][pid] = "不明"
                     st.rerun()
-
-    st.markdown("#### change状況")
-
-    for p in sort_players_by_order(get_active_players(), change_street):
-        pid = p["id"]
-        st.write(f"{pid} {p['position']}：{player_change_for_street(pid, change_street)}")
 
 
 # =========================
@@ -2378,6 +2293,12 @@ elif current_step in STEP_TO_BET_STREET:
             clear_action_log(street)
             reset_street_action(street)
             st.rerun()
+
+
+# =========================
+# 完了
+# =========================
+
 else:
     st.markdown(
         """
@@ -2404,12 +2325,9 @@ with move_ops[1]:
 
 st.divider()
 
-discard_cols = st.columns([1, 1], gap=None)
-
-with discard_cols[0]:
-    if st.button("このハンドを保存せず破棄して次へ", key="discard_current_hand"):
-        reset_hand_all()
-        st.rerun()
+if st.button("このハンドを保存せず破棄して次へ", key="discard_current_hand"):
+    reset_hand_all()
+    st.rerun()
 
 
 # =========================
@@ -2472,27 +2390,6 @@ with hand_cols[3]:
 
 
 # =========================
-# 詳細ログ表示
-# =========================
-
-st.divider()
-st.subheader("詳細ログ")
-
-detail_cols = st.columns(4)
-
-for idx, s in enumerate(BET_STREETS):
-    with detail_cols[idx]:
-        st.markdown(f"### {STREET_LABELS[s]}")
-        st.write(street_log_text(s))
-
-        if s != "pre":
-            st.markdown("**Change**")
-
-            for p in sort_players_by_order(st.session_state.players, s):
-                st.write(f'{p["id"]} {p["position"]}: {player_change_for_street(p["id"], s)}')
-
-
-# =========================
 # 基本情報・結果
 # =========================
 
@@ -2527,7 +2424,7 @@ tags = st.multiselect("タグ", TAG_OPTIONS)
 
 note = st.text_area(
     "メモ",
-    placeholder="例：BTN raise / BB call → 1st change BB 1c BTN 1c → BB check / BTN bet / BB call"
+    placeholder="例：UTG raise / BTN call / SB fold / BB fold"
 )
 
 
@@ -2560,6 +2457,7 @@ confirm_df = pd.DataFrame([{
     "Position": hero_position_preview,
     "Hand": cards_to_text(st.session_state.hero_cards["predraw_hand"]),
     "Pre Action": hero_pre_action_preview if hero_pre_action_preview else "—",
+    "Remaining Villains": ",".join([f'{p["id"]}:{p["position"]}' for p in get_remaining_villains()]),
     "Participation": participation_preview,
     "Hero投入": hero_invested_preview,
     "回収": hero_return_preview,
@@ -2623,6 +2521,10 @@ if st.button("保存して次のハンドへ", type="primary"):
 
         final_tags = sorted(set(tags + auto_tags))
 
+        remaining_villains_text = ",".join(
+            [f'{p["id"]}:{p["position"]}' for p in get_remaining_villains()]
+        )
+
         row = {
             "hand_no": hand_no,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2636,7 +2538,8 @@ if st.button("保存して次のハンドへ", type="primary"):
             "big_blind": st.session_state.big_blind,
 
             "hero_position": hero_position,
-            "opponent_count": st.session_state.opponent_count,
+            "opponent_count": get_remaining_villain_count(),
+            "remaining_villains": remaining_villains_text,
 
             "pot_current": st.session_state.pot_size,
             "hero_invested": hero_invested,
