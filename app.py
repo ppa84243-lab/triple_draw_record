@@ -1001,6 +1001,31 @@ def current_actor(street):
 
     return get_player_by_id(state["current_actor_id"])
 
+def get_current_action_player(street):
+    """
+    現在のstreetで、順番通りにアクションするプレイヤーを返す。
+    プリドロー・ベッティングを順番に進める用。
+    """
+    ensure_street_started(street)
+    state = st.session_state.action_state[street]
+
+    if state["complete"]:
+        return None
+
+    actor_id = state.get("current_actor_id")
+
+    if actor_id is None:
+        return None
+
+    player = get_player_by_id(actor_id)
+
+    if player is None:
+        return None
+
+    if not player.get("active", True):
+        return None
+
+    return player
 
 def get_selectable_action_players(street):
     state = st.session_state.action_state[street]
@@ -2274,26 +2299,55 @@ elif current_step in STEP_TO_BET_STREET:
             unsafe_allow_html=True,
         )
     else:
-        selectable_players = get_selectable_action_players(street)
-
-        if not selectable_players:
+        actor = get_current_action_player(street)
+        if actor is None:
             st.warning("アクション可能なプレイヤーがいません。")
         else:
-            player_labels = [
-                f'{p["id"]} {p["position"]}'
-                for p in selectable_players
-            ]
-
-            selected_label = st.selectbox(
-                "アクションするプレイヤー",
-                player_labels,
-                key=f"selected_actor_{street}",
+            st.markdown(
+                f"""
+                <div class="actor-box">
+                　現在のアクション対象：{actor["id"]} {actor["position"]}
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
-            selected_index = player_labels.index(selected_label)
-            actor = selectable_players[selected_index]
+            if actor["id"] == "H" and street == "pre":
+                render_hero_predraw_input()
 
-            st.session_state.action_state[street]["current_actor_id"] = actor["id"]
+                hand_size = MAX_HAND_SIZE[st.session_state.game_type]
+                current_count = len(st.session_state.hero_cards["predraw_hand"])
+
+                if current_count < hand_size:
+                    st.info(
+                        f"Heroのプリドローハンドは現在 {current_count}/{hand_size} 枚です。"
+                        " できれば全枚数入力してからアクションを選んでください。"
+                    )
+
+                action_disabled = False
+            else:
+                action_disabled = False
+
+            action_options = get_available_actions(street)
+            action_cols = st.columns(len(action_options), gap=None)
+
+            for i, action in enumerate(action_options):
+                with action_cols[i]:
+                    if st.button(
+                        action.upper(),
+                        key=f"actionbtn_{street}_{actor['id']}_{action}",
+                        disabled=action_disabled,
+                    ):
+                        apply_action(street, action, record=True, auto_move=True)
+                        st.rerun()
+
+            if st.session_state.action_state[street]["has_bet"]:
+                st.caption("bet/raiseに直面中、またはBB option：call/check / raise / fold")
+            else:
+                if street == "pre":
+                    st.caption("まだraiseなし：fold / check / call / raise")
+                else:
+                    st.caption("まだbetなし：check / bet")
 
             st.markdown(
                 f"""
