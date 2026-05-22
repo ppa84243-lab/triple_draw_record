@@ -2300,13 +2300,14 @@ elif current_step in STEP_TO_BET_STREET:
         )
     else:
         actor = get_current_action_player(street)
+
         if actor is None:
             st.warning("アクション可能なプレイヤーがいません。")
         else:
             st.markdown(
                 f"""
                 <div class="actor-box">
-                　現在のアクション対象：{actor["id"]} {actor["position"]}
+                    現在のアクション対象：{actor["id"]} {actor["position"]}
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -2335,53 +2336,7 @@ elif current_step in STEP_TO_BET_STREET:
                 with action_cols[i]:
                     if st.button(
                         action.upper(),
-                        key=f"actionbtn_{street}_{actor['id']}_{action}",
-                        disabled=action_disabled,
-                    ):
-                        apply_action(street, action, record=True, auto_move=True)
-                        st.rerun()
-
-            if st.session_state.action_state[street]["has_bet"]:
-                st.caption("bet/raiseに直面中、またはBB option：call/check / raise / fold")
-            else:
-                if street == "pre":
-                    st.caption("まだraiseなし：fold / check / call / raise")
-                else:
-                    st.caption("まだbetなし：check / bet")
-
-            st.markdown(
-                f"""
-                <div class="actor-box">
-                    選択中のアクション対象：{actor["id"]} {actor["position"]}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            if actor["id"] == "H" and street == "pre":
-                render_hero_predraw_input()
-
-                hand_size = MAX_HAND_SIZE[st.session_state.game_type]
-                current_count = len(st.session_state.hero_cards["predraw_hand"])
-
-                if current_count < hand_size:
-                    st.info(
-                        f"Heroのプリドローハンドは現在 {current_count}/{hand_size} 枚です。"
-                        " できれば全枚数入力してからアクションを選んでください。"
-                    )
-
-                action_disabled = False
-            else:
-                action_disabled = False
-
-            action_options = get_available_actions(street)
-            action_cols = st.columns(len(action_options), gap=None)
-
-            for i, action in enumerate(action_options):
-                with action_cols[i]:
-                    if st.button(
-                        action.upper(),
-                        key=f"actionbtn_{street}_{actor['id']}_{action}",
+                        key=f"actionbtn_{current_step}_{street}_{actor['id']}_{action}_{i}",
                         disabled=action_disabled,
                     ):
                         apply_action(street, action, record=True, auto_move=True)
@@ -2404,31 +2359,25 @@ elif current_step in STEP_TO_BET_STREET:
     log_ops = st.columns(4)
 
     with log_ops[0]:
-        if st.button("残り全員fold", key=f"fold_remaining_{street}"):
+        if st.button("残り全員fold", key=f"fold_remaining_{current_step}_{street}"):
             fold_remaining_players(street)
             st.rerun()
 
     with log_ops[1]:
-        if st.button("1つ戻す"):
+        if st.button("1つ戻す", key=f"undo_action_{current_step}_{street}"):
             undo_action_log(street)
             st.rerun()
 
     with log_ops[2]:
-        if st.button("このbettingクリア"):
+        if st.button("このbettingクリア", key=f"clear_betting_{current_step}_{street}"):
             clear_action_log(street)
             st.rerun()
 
     with log_ops[3]:
-        if st.button("このbettingリセット"):
+        if st.button("このbettingリセット", key=f"reset_betting_{current_step}_{street}"):
             clear_action_log(street)
             reset_street_action(street)
             st.rerun()
-
-
-# =========================
-# 完了
-# =========================
-
 else:
     st.markdown(
         """
