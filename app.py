@@ -1592,6 +1592,7 @@ def get_pre_actions_for_player(player_id):
     """
     座席表用。
     プレイヤーごとに現在押せるプリドローアクションを返す。
+    raise後にpendingへ戻ったプレイヤーは再度action可能。
     """
     street = "pre"
     state = st.session_state.action_state[street]
@@ -1605,6 +1606,9 @@ def get_pre_actions_for_player(player_id):
         return []
 
     if state["complete"]:
+        return []
+
+    if not can_player_act_pre(player_id):
         return []
 
     old_actor = state.get("current_actor_id")
@@ -1718,6 +1722,48 @@ def get_hero_pre_action():
 
     return ""
 
+def get_player_pre_action_line(player_id):
+    """
+    指定プレイヤーのPre action履歴を全部返す。
+    例: raise → call / call → fold
+    """
+    actions = []
+
+    for entry in st.session_state.logs.get("pre", []):
+        if entry.get("player_id") == player_id:
+            actions.append(entry.get("action", ""))
+
+    actions = [a for a in actions if a]
+
+    if not actions:
+        return ""
+
+    return " → ".join(actions)
+
+
+def can_player_act_pre(player_id):
+    """
+    座席表のPre actionボタンを出すべきか判定する。
+    raise後に再度pendingに入ったプレイヤーは、もう一度action可能。
+    """
+    street = "pre"
+    state = st.session_state.action_state[street]
+
+    player = get_player_by_id(player_id)
+
+    if player is None:
+        return False
+
+    if not player.get("active", True):
+        return False
+
+    if state["complete"]:
+        return False
+
+    if state.get("has_bet", False):
+        return player_id in state.get("pending", [])
+
+    return player_id not in state.get("acted", [])
 
 def hero_faced_raise_pre():
     for entry in st.session_state.logs.get("pre", []):
@@ -2129,12 +2175,14 @@ for p in sort_players_by_order(st.session_state.players, "pre"):
         st.write(position)
 
     with cols[2]:
-        if not is_active:
-            st.write("fold")
-        elif pre_state["complete"]:
-            st.write("pre完了")
-        else:
-            st.write("active")
+    pre_action_line = get_player_pre_action_line(player_id)
+
+    if pre_action_line:
+        st.write(pre_action_line)
+    elif not is_active:
+        st.write("fold")
+    else:
+        st.write("未入力")
 
     with cols[3]:
         if is_pre_step and is_active and not pre_state["complete"]:
