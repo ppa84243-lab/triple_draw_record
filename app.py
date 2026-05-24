@@ -2207,8 +2207,7 @@ for p in sort_players_by_order(st.session_state.players, "pre"):
                 st.caption("actionなし")
         else:
             st.caption("")
-        else:
-            st.caption("Pre以外")
+       
 
 
 # =========================
