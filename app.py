@@ -115,7 +115,7 @@ CHANGE_OPTIONS_27TD = ["不明", "pat", "1c", "2c", "3c", "4c", "5c"]
 CHANGE_OPTIONS_BADUGI = ["不明", "pat", "1c", "2c", "3c", "4c"]
 
 PREDRAW_ACTIONS_NO_RAISE = ["fold", "check", "call", "raise"]
-PREDRAW_ACTIONS_FACING_RAISE = ["call", "raise", "fold"]
+PREDRAW_ACTIONS_FACING_RAISE = ["folo", "call", "raise"]
 PREDRAW_ACTIONS_BB_OPTION = ["fold", "check", "raise"]
 
 POSTDRAW_ACTIONS_NO_BET = ["check", "bet"]
