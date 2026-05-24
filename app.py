@@ -1388,13 +1388,24 @@ def apply_action(street, action, record=True, auto_move=True):
         return
 
     if action in ["bet", "raise"]:
-        state["has_bet"] = True
+    state["has_bet"] = True
 
-        active_ids = get_ordered_ids(street)
-        state["pending"] = [pid for pid in active_ids if pid != actor_id]
-        state["acted"] = [actor_id]
-        state["current_actor_id"] = get_next_id_after(street, actor_id, state["pending"])
-        return
+    active_ids = get_ordered_ids(street)
+
+    if street == "pre":
+        state["pending"] = [
+            pid for pid in active_ids
+            if pid != actor_id and not has_player_folded_pre(pid)
+        ]
+    else:
+        state["pending"] = [
+            pid for pid in active_ids
+            if pid != actor_id
+        ]
+
+    state["acted"] = [actor_id]
+    state["current_actor_id"] = get_next_id_after(street, actor_id, state["pending"])
+    return
 
     if state["has_bet"]:
         if actor_id in state["pending"]:
@@ -1568,7 +1579,7 @@ def apply_pre_action_for_player(player_id, action):
         st.toast("プレイヤーが見つかりません")
         return
 
-    if not player.get("active", True):
+    if has_player_folded_pre(player_id) or not player.get("active", True):
         st.toast("このプレイヤーはすでにfoldしています")
         return
 
@@ -1740,11 +1751,21 @@ def get_player_pre_action_line(player_id):
 
     return " → ".join(actions)
 
+def has_player_folded_pre(player_id):
+    """
+    指定プレイヤーがPreで一度でもfoldしているか。
+    fold済みなら、他プレイヤーのraise後でも再アクション不可。
+    """
+    for entry in st.session_state.logs.get("pre", []):
+        if entry.get("player_id") == player_id and entry.get("action") == "fold":
+            return True
+
+    return False
 
 def can_player_act_pre(player_id):
     """
     座席表のPre actionボタンを出すべきか判定する。
-    raise後に再度pendingに入ったプレイヤーは、もう一度action可能。
+    fold済みプレイヤーは、他プレイヤーのraise後でも再表示しない。
     """
     street = "pre"
     state = st.session_state.action_state[street]
@@ -1752,6 +1773,9 @@ def can_player_act_pre(player_id):
     player = get_player_by_id(player_id)
 
     if player is None:
+        return False
+
+    if has_player_folded_pre(player_id):
         return False
 
     if not player.get("active", True):
