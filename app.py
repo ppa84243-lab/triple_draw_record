@@ -928,6 +928,13 @@ def get_pre_ordered_ids_all():
     """
     return [p["id"] for p in sort_players_by_order(st.session_state.players, "pre")]
 
+def get_pre_ordered_ids_all():
+    """
+    Preの座席順で、現在の全プレイヤーIDを返す。
+    fold済みも含む。
+    """
+    return [p["id"] for p in sort_players_by_order(st.session_state.players, "pre")]
+
 def get_next_id_after(street, current_id, candidate_ids):
     ordered_ids = get_ordered_ids(street)
 
@@ -1632,6 +1639,88 @@ def auto_fold_skipped_pre_players(target_player_id):
 
         if pid == "H":
             # Heroを勝手にfoldしない
+            continue
+
+        player = get_player_by_id(pid)
+
+        if player is None:
+            continue
+
+        if not player.get("active", True):
+            continue
+
+        if has_player_folded_pre(pid):
+            continue
+
+        # すでにPreで何か入力済みなら触らない
+        if get_player_pre_action_line(pid):
+            continue
+
+        state["current_actor_id"] = pid
+
+        apply_action(
+            street,
+            "fold",
+            record=True,
+            auto_move=False,
+        )
+    
+def auto_fold_skipped_pre_players(target_player_id):
+    """
+    座席表でPre actionを入力したとき、
+    直前のアクション位置からtarget_player_idまでの間にいる
+    未入力プレイヤーを自動foldする。
+
+    例:
+    UTG raise の後に CO call
+    → UTG+1, HJ を自動fold
+
+    BTN raise
+    → BTNより前で未入力のプレイヤーだけ自動fold
+    → SB/BBなど後ろの未行動者は残す
+    """
+    street = "pre"
+    state = st.session_state.action_state[street]
+
+    if state["complete"]:
+        return
+
+    ordered_ids = get_pre_ordered_ids_all()
+
+    if target_player_id not in ordered_ids:
+        return
+
+    acted_ids = [
+        entry["player_id"]
+        for entry in st.session_state.logs.get("pre", [])
+        if entry.get("player_id")
+    ]
+
+    if not acted_ids:
+        start_index = -1
+    else:
+        last_actor_id = acted_ids[-1]
+
+        if last_actor_id not in ordered_ids:
+            return
+
+        start_index = ordered_ids.index(last_actor_id)
+
+    target_index = ordered_ids.index(target_player_id)
+
+    # 通常の前進だけ自動foldする
+    # targetが前に戻っている場合は、raise後に前の人へ戻っているケースなので自動foldしない
+    if target_index <= start_index:
+        return
+
+    skipped_ids = ordered_ids[start_index + 1:target_index]
+
+    for pid in skipped_ids:
+        if pid == target_player_id:
+            continue
+
+        # Heroは勝手にfoldしない
+        if pid == "H":
             continue
 
         player = get_player_by_id(pid)
