@@ -1388,24 +1388,24 @@ def apply_action(street, action, record=True, auto_move=True):
         return
 
     if action in ["bet", "raise"]:
-    state["has_bet"] = True
-
-    active_ids = get_ordered_ids(street)
-
-    if street == "pre":
-        state["pending"] = [
-            pid for pid in active_ids
-            if pid != actor_id and not has_player_folded_pre(pid)
-        ]
-    else:
-        state["pending"] = [
-            pid for pid in active_ids
-            if pid != actor_id
-        ]
-
-    state["acted"] = [actor_id]
-    state["current_actor_id"] = get_next_id_after(street, actor_id, state["pending"])
-    return
+        state["has_bet"] = True
+    
+        active_ids = get_ordered_ids(street)
+    
+        if street == "pre":
+            state["pending"] = [
+                pid for pid in active_ids
+                if pid != actor_id and not has_player_folded_pre(pid)
+            ]
+        else:
+            state["pending"] = [
+                pid for pid in active_ids
+                if pid != actor_id
+            ]
+    
+        state["acted"] = [actor_id]
+        state["current_actor_id"] = get_next_id_after(street, actor_id, state["pending"])
+        return
 
     if state["has_bet"]:
         if actor_id in state["pending"]:
