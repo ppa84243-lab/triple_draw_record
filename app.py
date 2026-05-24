@@ -1947,6 +1947,12 @@ def has_player_folded_pre(player_id):
 
     return False
 
+def hero_folded_pre():
+    """
+    HeroがPreでfoldしているか。
+    """
+    return has_player_folded_pre("H")
+
 def can_player_act_pre(player_id):
     street = "pre"
     state = st.session_state.action_state[street]
@@ -2736,10 +2742,22 @@ with b2:
     tournament_name = st.text_input("大会名", placeholder="例：Spadie")
 
 with b3:
-    result = st.selectbox("結果", RESULT_OPTIONS)
+    result_index = RESULT_OPTIONS.index("fold") if st.session_state.get("quick_result_fold", False) else 0
+
+    result = st.selectbox(
+        "結果",
+        RESULT_OPTIONS,
+        index=result_index,
+    )
 
 with b4:
-    hero_return = st.number_input("回収額", value=0.0, step=100.0)
+    return_value = 0.0 if st.session_state.get("quick_return_zero", False) else 0.0
+
+    hero_return = st.number_input(
+        "回収額",
+        value=return_value,
+        step=100.0,
+    )
 
 with b5:
     hero_invested_now = float(st.session_state.get("hero_invested", 0.0))
@@ -2758,6 +2776,27 @@ note = st.text_area(
     placeholder="例：UTG raise / BTN call / SB fold / BB fold"
 )
 
+# =========================
+# Hero Pre fold 即保存案内
+# =========================
+
+if hero_folded_pre():
+    st.warning("HeroはPreでfold済みです。このまま保存できます。")
+
+    quick_cols = st.columns([1, 1, 2], gap="small")
+
+    with quick_cols[0]:
+        if st.button("結果をfoldにする", key="quick_set_result_fold"):
+            st.session_state["quick_result_fold"] = True
+            st.rerun()
+
+    with quick_cols[1]:
+        if st.button("回収額を0にする", key="quick_set_return_zero"):
+            st.session_state["quick_return_zero"] = True
+            st.rerun()
+
+    with quick_cols[2]:
+        st.caption("HeroがPre foldしたハンドは、結果fold・回収0で保存すると記録しやすいです。")
 
 # =========================
 # 保存前確認
@@ -2934,6 +2973,9 @@ if st.button("保存して次のハンドへ", type="primary"):
         save_data(row)
 
         st.session_state.current_stack = max(0.0, stack_after)
+
+        st.session_state["quick_result_fold"] = False
+        st.session_state["quick_return_zero"] = False
 
         st.success("保存しました。")
         reset_hand_all()
