@@ -2166,7 +2166,7 @@ for p in sort_players_by_order(st.session_state.players, "pre"):
     position = p["position"]
     is_active = p.get("active", True)
 
-    cols = st.columns([1, 1.5, 1.5, 6], gap="small")
+    cols = st.columns([1, 1.5, 2.5, 6], gap="small")
 
     with cols[0]:
         st.write(player_id)
@@ -2175,18 +2175,17 @@ for p in sort_players_by_order(st.session_state.players, "pre"):
         st.write(position)
 
     with cols[2]:
-    pre_action_line = get_player_pre_action_line(player_id)
+        pre_action_line = get_player_pre_action_line(player_id)
 
-    if pre_action_line:
-        st.write(pre_action_line)
-    elif not is_active:
-        st.write("fold")
-    else:
-        st.write("未入力")
+        if pre_action_line:
+            st.write(pre_action_line)
+        elif not is_active:
+            st.write("fold")
+        else:
+            st.write("未入力")
 
     with cols[3]:
-        if is_pre_step and is_active and not pre_state["complete"]:
-            # Heroの番なら手札入力をここで出す
+        if is_pre_step and can_player_act_pre(player_id):
             if player_id == "H":
                 with st.expander("Hero手札入力", expanded=False):
                     render_hero_predraw_input()
@@ -2200,12 +2199,14 @@ for p in sort_players_by_order(st.session_state.players, "pre"):
                     with action_cols[i]:
                         if st.button(
                             action.upper(),
-                            key=f"seat_pre_action_{player_id}_{action}_{i}",
+                            key=f"seat_pre_action_{player_id}_{action}_{i}_{len(st.session_state.logs.get('pre', []))}",
                         ):
                             apply_pre_action_for_player(player_id, action)
                             st.rerun()
             else:
                 st.caption("actionなし")
+        else:
+            st.caption("")
         else:
             st.caption("Pre以外")
 
