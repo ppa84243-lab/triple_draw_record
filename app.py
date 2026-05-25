@@ -341,6 +341,12 @@ def init_state():
     if "current_stack" not in st.session_state:
         st.session_state.current_stack = 0.0
 
+    if "manual_pot" not in st.session_state:
+    st.session_state.manual_pot = 0.0
+
+    if "use_manual_pot" not in st.session_state:
+    st.session_state.use_manual_pot = False
+
 
 init_state()
 
@@ -844,6 +850,9 @@ def reset_pot_state():
     st.session_state.hero_invested = 0.0
     st.session_state.blinds_posted = False
 
+    st.session_state.manual_pot = 0.0
+    st.session_state.use_manual_pot = False
+
 
 def reset_hand_all():
     st.session_state.hero_cards = {field: [] for field in HERO_CARD_FIELDS}
@@ -1315,7 +1324,31 @@ def render_pot_panel():
     with bs_cols[6]:
         st.metric("Hero投入額", st.session_state.get("hero_invested", 0.0))
 
-    btn_cols = st.columns([1, 1, 2], gap="small")
+    manual_cols = st.columns([1, 1, 2], gap="small")
+
+    with manual_cols[0]:
+        st.checkbox(
+            "手動potを使う",
+            key="use_manual_pot",
+        )
+    
+    with manual_cols[1]:
+        st.number_input(
+            "手動pot",
+            min_value=0.0,
+            step=100.0,
+            key="manual_pot",
+        )
+    
+    with manual_cols[2]:
+        effective_pot = (
+            st.session_state.manual_pot
+            if st.session_state.use_manual_pot
+            else st.session_state.pot_size
+        )
+        st.metric("保存pot", effective_pot)
+    
+        btn_cols = st.columns([1, 1, 2], gap="small")
 
     with btn_cols[0]:
         if st.button("ブラインド投入/再計算", key="post_blinds_btn"):
@@ -2044,6 +2077,7 @@ def build_simple_saved_df(df):
         "hero_pre_action",
         "participation_type",
         "end_reason",
+        "pot_saved",
         "hero_invested",
         "hero_return",
         "profit",
@@ -2849,6 +2883,13 @@ confirm_df = pd.DataFrame([{
     "Remaining Villains": ",".join([f'{p["id"]}:{p["position"]}' for p in get_remaining_villains()]),
     "Participation": participation_preview,
     "Hero投入": hero_invested_preview,
+    "自動pot": st.session_state.pot_size,
+    "手動pot使用": st.session_state.use_manual_pot,
+    "保存pot": (
+        st.session_state.manual_pot
+        if st.session_state.use_manual_pot
+        else st.session_state.pot_size
+    ),
     "回収": hero_return_preview,
     "収支": profit_preview,
     "保存前スタック": stack_before_preview,
@@ -2931,6 +2972,14 @@ if st.button("保存して次のハンドへ", type="primary"):
             "remaining_villains": remaining_villains_text,
 
             "pot_current": st.session_state.pot_size,
+            "pot_auto": st.session_state.pot_size,
+            "pot_manual": st.session_state.manual_pot,
+            "use_manual_pot": st.session_state.use_manual_pot,
+            "pot_saved": (
+                st.session_state.manual_pot
+                if st.session_state.use_manual_pot
+                else st.session_state.pot_size
+            ),
             "hero_invested": hero_invested,
             "hero_return": hero_return,
             "profit": hand_profit,
