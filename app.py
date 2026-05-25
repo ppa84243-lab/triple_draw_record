@@ -342,10 +342,10 @@ def init_state():
         st.session_state.current_stack = 0.0
 
     if "manual_pot" not in st.session_state:
-    st.session_state.manual_pot = 0.0
+        st.session_state.manual_pot = 0.0
 
     if "use_manual_pot" not in st.session_state:
-    st.session_state.use_manual_pot = False
+        st.session_state.use_manual_pot = False
 
 
 init_state()
