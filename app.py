@@ -123,6 +123,16 @@ POSTDRAW_ACTIONS_FACING_BET = ["call", "raise", "fold"]
 
 RESULT_OPTIONS = ["win", "lose", "split", "fold", "unknown"]
 
+END_REASON_OPTIONS = [
+    "pre fold",
+    "1st fold",
+    "2nd fold",
+    "3rd fold",
+    "showdown",
+    "walk",
+    "unknown",
+]
+
 TAG_OPTIONS = [
     "即fold",
     "dealt_only",
@@ -2033,6 +2043,7 @@ def build_simple_saved_df(df):
         "hero_predraw_hand",
         "hero_pre_action",
         "participation_type",
+        "end_reason",
         "hero_invested",
         "hero_return",
         "profit",
@@ -2731,7 +2742,7 @@ with hand_cols[3]:
 st.divider()
 st.subheader("基本情報・結果")
 
-b1, b2, b3, b4, b5, b6 = st.columns(6)
+b1, b2, b3, b4, b5, b6, b7= st.columns(7)
 
 with b1:
     played_date = st.date_input("日付", value=date.today())
@@ -2764,6 +2775,15 @@ with b5:
 
 with b6:
     mistake_level = st.selectbox("ミス度", ["なし", "小", "中", "大", "要検討"])
+
+with b7:
+    default_end_reason = "pre fold" if hero_folded_pre() else "unknown"
+
+    end_reason = st.selectbox(
+        "終了理由",
+        END_REASON_OPTIONS,
+        index=END_REASON_OPTIONS.index(default_end_reason),
+    )
 
 st.subheader("メモ・タグ")
 
@@ -2825,6 +2845,7 @@ confirm_df = pd.DataFrame([{
     "Position": hero_position_preview,
     "Hand": cards_to_text(st.session_state.hero_cards["predraw_hand"]),
     "Pre Action": hero_pre_action_preview if hero_pre_action_preview else "—",
+    "終了理由": end_reason,
     "Remaining Villains": ",".join([f'{p["id"]}:{p["position"]}' for p in get_remaining_villains()]),
     "Participation": participation_preview,
     "Hero投入": hero_invested_preview,
@@ -2949,6 +2970,7 @@ if st.button("保存して次のハンドへ", type="primary"):
             "third_action_line": street_log_text("3rd"),
 
             "result": result,
+            "end_reason": end_reason,
             "mistake_level": mistake_level,
             "tags": ",".join(final_tags),
             "note": note,
