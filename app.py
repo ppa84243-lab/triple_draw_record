@@ -2364,6 +2364,27 @@ with setting_cols[1]:
         st.rerun()
 
 # =========================
+# ストリート別ログ
+# =========================
+
+with st.expander("ストリート別ログ", expanded=False):
+    st.dataframe(
+        build_street_summary_df(),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+
+# =========================
+# 進行入力
+# =========================
+
+st.divider()
+st.subheader("進行入力")
+
+render_pot_panel()
+
+# =========================
 # 7max座席設定 + Pre action
 # =========================
 
@@ -2418,29 +2439,6 @@ for p in sort_players_by_order(st.session_state.players, "pre"):
                 st.caption("actionなし")
         else:
             st.caption("")
-       
-
-
-# =========================
-# ストリート別ログ
-# =========================
-
-with st.expander("ストリート別ログ", expanded=False):
-    st.dataframe(
-        build_street_summary_df(),
-        hide_index=True,
-        use_container_width=True,
-    )
-
-
-# =========================
-# 進行入力
-# =========================
-
-st.divider()
-st.subheader("進行入力")
-
-render_pot_panel()
 
 st.markdown("### アクション入力")
 
